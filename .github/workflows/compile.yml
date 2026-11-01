@@ -99,3 +99,31 @@ jobs:
           path: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/debug/*.apk
+
+  release:
+    name: Publish release
+    needs: [desktop, android]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v1.0.${{ github.run_number }}"
+          TITLE="$(git log -1 --format=%s)"          # release title = pushed commit message
+          BODY="$(git log -1 --format=%b)"
+          APK="$(find artifacts -name '*.apk' | head -n 1)"
+          JAR="$(find artifacts -name '*.jar' | head -n 1)"
+          cp "$APK" "Backrooms-$TAG.apk"
+          cp "$JAR" "Backrooms-$TAG.jar"
+          printf '%s\n\nBuild #%s · commit %s\n' "$BODY" "${{ github.run_number }}" "$GITHUB_SHA" > notes.md
+          gh release create "$TAG" "Backrooms-$TAG.apk" "Backrooms-$TAG.jar" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$TITLE" --notes-file notes.md

@@ -156,7 +156,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             pFill.style = Paint.Style.FILL; pFill.color = Color.argb(if (on) 175 else 130, 0, 0, 0); c.drawRoundRect(rc, 14 * dp, 14 * dp, pFill)
             pFill.shader = LinearGradient(0f, rc.top, 0f, rc.bottom, acc(d, if (on) 70 else 25), acc(d, 0), Shader.TileMode.CLAMP)
             c.drawRoundRect(rc, 14 * dp, 14 * dp, pFill); pFill.shader = null
-            pFill.style = Paint.Style.STROKE; pFill.strokeWidth = (if (on) 3 else 1.5f) * dp; pFill.color = acc(d, if (on) 255 else 110)
+            pFill.style = Paint.Style.STROKE; pFill.strokeWidth = (if (on) 3f else 1.5f) * dp; pFill.color = acc(d, if (on) 255 else 110)
             c.drawRoundRect(rc, 14 * dp, 14 * dp, pFill)
 
             val tx = rc.left + 12 * dp
