@@ -41,7 +41,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     @Volatile private var running = false
     private var thread: Thread? = null
     private var playT = 0.0; private var fps = 60.0
-    private val cardRects = Array(3) { RectF() }
+    private val cardRects = Array(LEVELS.size) { RectF() }
 
     private val dp = resources.displayMetrics.density
     private val pText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.DEFAULT_BOLD; setShadowLayer(4f, 2f, 2f, Color.argb(190, 0, 0, 0)) }
@@ -149,27 +149,28 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         pText.textAlign = Paint.Align.CENTER; pText.textSize = 11 * dp; pText.letterSpacing = 0.3f; pText.color = Color.rgb(220, 212, 185)
         c.drawText("POCKET EDITION  ·  MULTIPLAYER", w / 2, h * 0.23f, pText)
 
-        val cw = w * 0.26f; val gap = w * 0.03f; val x0 = (w - (3 * cw + 2 * gap)) / 2; val top = h * 0.29f; val ch = h * 0.40f
-        for (i in 0..2) {
+        val cols = 4; val gap = 8 * dp; val cw = (w * 0.9f - gap * (cols - 1)) / cols; val ch = h * 0.20f
+        val x0 = (w - (cols * cw + gap * (cols - 1))) / 2; val top = h * 0.27f
+        for (i in LEVELS.indices) {
             val d = LEVELS[i]; val on = Progress.found[i]; val rc = cardRects[i]
-            rc.set(x0 + i * (cw + gap), top, x0 + i * (cw + gap) + cw, top + ch)
-            pFill.style = Paint.Style.FILL; pFill.color = Color.argb(if (on) 175 else 130, 0, 0, 0); c.drawRoundRect(rc, 14 * dp, 14 * dp, pFill)
-            pFill.shader = LinearGradient(0f, rc.top, 0f, rc.bottom, acc(d, if (on) 70 else 25), acc(d, 0), Shader.TileMode.CLAMP)
-            c.drawRoundRect(rc, 14 * dp, 14 * dp, pFill); pFill.shader = null
-            pFill.style = Paint.Style.STROKE; pFill.strokeWidth = (if (on) 3f else 1.5f) * dp; pFill.color = acc(d, if (on) 255 else 110)
-            c.drawRoundRect(rc, 14 * dp, 14 * dp, pFill)
-
-            val tx = rc.left + 12 * dp
-            pText.textAlign = Paint.Align.LEFT; pText.letterSpacing = 0.25f; pText.textSize = 10 * dp; pText.color = acc(d)
-            c.drawText("LEVEL ${d.id}", tx, rc.top + 22 * dp, pText)
-            pText.letterSpacing = 0.05f; pText.textSize = 15 * dp; pText.color = Color.WHITE
-            c.drawText(if (on) d.name else "???", tx, rc.top + 44 * dp, pText)
-            pText.typeface = Typeface.DEFAULT; pText.textSize = 10.5f * dp; pText.color = Color.rgb(215, 208, 185)
-            var ly = rc.top + 62 * dp
-            for (line in wrap(if (on) d.blurb else "Not discovered yet.", pText, rc.width() - 24 * dp)) { c.drawText(line, tx, ly, pText); ly += 13 * dp }
-            pText.typeface = Typeface.DEFAULT_BOLD; pText.letterSpacing = 0.15f; pText.textSize = 9.5f * dp
-            pText.color = if (d.entities == "NONE") Color.rgb(150, 200, 150) else Color.rgb(235, 110, 90)
-            c.drawText("ENTITIES · ${if (on) d.entities else "???"}", tx, rc.bottom - 12 * dp, pText)
+            val l = x0 + (i % cols) * (cw + gap); val tp = top + (i / cols) * (ch + gap)
+            rc.set(l, tp, l + cw, tp + ch)
+            pFill.style = Paint.Style.FILL; pFill.color = Color.argb(if (on) 175 else 130, 0, 0, 0); c.drawRoundRect(rc, 12 * dp, 12 * dp, pFill)
+            pFill.shader = LinearGradient(0f, rc.top, 0f, rc.bottom, acc(d, if (on) 70 else 20), acc(d, 0), Shader.TileMode.CLAMP)
+            c.drawRoundRect(rc, 12 * dp, 12 * dp, pFill); pFill.shader = null
+            pFill.style = Paint.Style.STROKE; pFill.strokeWidth = (if (on) 2.5f else 1.2f) * dp; pFill.color = acc(d, if (on) 255 else 90)
+            c.drawRoundRect(rc, 12 * dp, 12 * dp, pFill)
+            val tx = rc.left + 10 * dp
+            pText.textAlign = Paint.Align.LEFT; pText.letterSpacing = 0.2f; pText.typeface = Typeface.DEFAULT_BOLD
+            pText.textSize = 9 * dp; pText.color = if (on) acc(d) else acc(d, 120)
+            c.drawText(d.label, tx, rc.top + 17 * dp, pText)
+            pText.letterSpacing = 0.03f; pText.textSize = 13 * dp; pText.color = if (on) Color.WHITE else Color.rgb(150, 150, 150)
+            val nm = if (on) d.name else "???"
+            while (pText.measureText(nm) > rc.width() - 18 * dp && pText.textSize > 8 * dp) pText.textSize -= 0.5f * dp
+            c.drawText(nm, tx, rc.top + 36 * dp, pText)
+            pText.textSize = 8.5f * dp; pText.letterSpacing = 0.1f
+            pText.color = if (!on) Color.rgb(120, 120, 120) else if (d.entities == "NONE") Color.rgb(150, 200, 150) else Color.rgb(235, 110, 90)
+            c.drawText(if (on) d.entities else "???", tx, rc.bottom - 10 * dp, pText)
         }
 
         pText.textAlign = Paint.Align.CENTER; pText.typeface = Typeface.DEFAULT; pText.textSize = 11 * dp; pText.letterSpacing = 0.05f
@@ -191,7 +192,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         c.drawRoundRect(RectF(12 * dp, 12 * dp, 230 * dp, 76 * dp), 10 * dp, 10 * dp, pFill)
         pFill.color = a; c.drawRoundRect(RectF(12 * dp, 12 * dp, 16 * dp, 76 * dp), 3 * dp, 3 * dp, pFill)
         pText.textAlign = Paint.Align.LEFT; pText.letterSpacing = 0.15f; pText.typeface = Typeface.DEFAULT_BOLD
-        pText.textSize = 12 * dp; pText.color = a; c.drawText("LEVEL ${d.id} · ${d.name}", 26 * dp, 32 * dp, pText)
+        pText.textSize = 12 * dp; pText.color = a; c.drawText("${d.label} · ${d.name}", 26 * dp, 32 * dp, pText)
         val n = net
         val status = when {
             n == null -> "OFFLINE · SOLO"; n.state == 0 -> "CONNECTING…"
@@ -214,7 +215,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             pText.letterSpacing = 0.3f; pText.textSize = 11 * dp; pText.color = Color.argb((al * 255).toInt(), 220, 215, 195)
             c.drawText(g.arrival, w / 2, h * 0.31f, pText)
             pTitle.color = acc(d, (al * 255).toInt()); pTitle.textSize = h / 10f; pTitle.setShadowLayer(8f, 2f, 2f, Color.argb((al * 180).toInt(), 0, 0, 0))
-            c.drawText("LEVEL ${d.id}", w / 2, h * 0.42f, pTitle)
+            c.drawText("${d.label}", w / 2, h * 0.42f, pTitle)
             pText.letterSpacing = 0.35f; pText.textSize = 15 * dp; pText.color = Color.argb((al * 255).toInt(), 240, 235, 215)
             c.drawText(d.name, w / 2, h * 0.52f, pText)
         }
