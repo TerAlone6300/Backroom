@@ -39,7 +39,7 @@ fun main(args: Array<String>) {
     val g = Game(); val menuG = Game()
     var net: Net? = null; var inMenu = true; var fps = 60.0; var playT = 0.0
     val ip = StringBuilder(args.firstOrNull() ?: "")
-    var btn = Rectangle(); val cardRects = Array(3) { Rectangle() }
+    var btn = Rectangle(); val cardRects = Array(LEVELS.size) { Rectangle() }
     val robot = try { Robot() } catch (_: Exception) { null }
     val blank = Toolkit.getDefaultToolkit().createCustomCursor(BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), Point(0, 0), "blank")
     var recenter = false
@@ -62,25 +62,25 @@ fun main(args: Array<String>) {
             txt(g2, "THE BACKROOMS", cx, (hh * 0.15).toInt(), Font("Serif", Font.BOLD, hh / 9), ac)
             txt(g2, "POCKET EDITION  ·  MULTIPLAYER", cx, (hh * 0.21).toInt(), spaced(Font("SansSerif", Font.PLAIN, hh / 40), 0.3f), Color(220, 212, 185))
 
-            val cw = (w * 0.23).toInt(); val gap = (w * 0.025).toInt(); val ch = (hh * 0.36).toInt()
-            val x0 = (w - (3 * cw + 2 * gap)) / 2; val cy = (hh * 0.29).toInt()
-            for (i in 0..2) {
-                val d = LEVELS[i]; val c = Color(d.accent); val on = Progress.found[i]; val pad = 0
-                val rc = Rectangle(x0 + i * (cw + gap) - pad, cy - pad, cw + 2 * pad, ch + 2 * pad); cardRects[i] = rc
-                g2.color = Color(0, 0, 0, if (on) 175 else 130); g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 18, 18)
-                g2.paint = GradientPaint(0f, rc.y.toFloat(), Color(c.red, c.green, c.blue, if (on) 70 else 25),
+            val cols = 4; val gap = (w * 0.012).toInt(); val cw = (w * 0.22).toInt(); val ch = (hh * 0.125).toInt()
+            val x0 = (w - (cols * cw + (cols - 1) * gap)) / 2; val cy = (hh * 0.24).toInt()
+            for (i in LEVELS.indices) {
+                val d = LEVELS[i]; val c = Color(d.accent); val on = Progress.found[i]
+                val rc = Rectangle(x0 + (i % cols) * (cw + gap), cy + (i / cols) * (ch + gap), cw, ch); cardRects[i] = rc
+                g2.color = Color(0, 0, 0, if (on) 175 else 130); g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14)
+                g2.paint = GradientPaint(0f, rc.y.toFloat(), Color(c.red, c.green, c.blue, if (on) 70 else 20),
                     0f, (rc.y + rc.height).toFloat(), Color(c.red, c.green, c.blue, 0))
-                g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 18, 18)
-                g2.stroke = BasicStroke(if (on) 3f else 1.5f); g2.color = Color(c.red, c.green, c.blue, if (on) 255 else 110)
-                g2.drawRoundRect(rc.x, rc.y, rc.width, rc.height, 18, 18)
-                val px0 = rc.x + 20
-                txt(g2, "LEVEL ${d.id}", px0, rc.y + rc.height * 16 / 100, spaced(Font("SansSerif", Font.BOLD, hh / 46), 0.3f), c, false)
-                txt(g2, if (on) d.name else "???", px0, rc.y + rc.height * 31 / 100, Font("Serif", Font.BOLD, hh / 30), Color.WHITE, false)
-                val bf = Font("SansSerif", Font.PLAIN, hh / 50); g2.font = bf
-                var ly = rc.y + rc.height * 45 / 100
-                for (line in wrap(g2.fontMetrics, if (on) d.blurb else "Not discovered yet.", rc.width - 40)) { txt(g2, line, px0, ly, bf, Color(215, 208, 185), false); ly += hh / 38 }
-                txt(g2, "ENTITIES · ${if (on) d.entities else "???"}", px0, rc.y + rc.height - 18, spaced(Font("SansSerif", Font.BOLD, hh / 56), 0.2f),
-                    if (d.entities == "NONE") Color(150, 200, 150) else Color(235, 110, 90), false)
+                g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14)
+                g2.stroke = BasicStroke(if (on) 2.5f else 1.2f); g2.color = Color(c.red, c.green, c.blue, if (on) 255 else 90)
+                g2.drawRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14)
+                val px0 = rc.x + 12
+                txt(g2, d.label, px0, rc.y + ch * 27 / 100, spaced(Font("SansSerif", Font.BOLD, hh / 60), 0.25f), if (on) c else Color(c.red, c.green, c.blue, 120), false)
+                val nm = if (on) d.name else "???"
+                var nf = Font("Serif", Font.BOLD, hh / 36); g2.font = nf
+                while (g2.fontMetrics.stringWidth(nm) > rc.width - 22 && nf.size > 8) { nf = nf.deriveFont(nf.size2D - 1f); g2.font = nf }
+                txt(g2, nm, px0, rc.y + ch * 58 / 100, nf, if (on) Color.WHITE else Color(150, 150, 150), false)
+                txt(g2, if (on) d.entities else "???", px0, rc.y + ch - 9, spaced(Font("SansSerif", Font.BOLD, hh / 68), 0.15f),
+                    if (!on) Color(130, 130, 130) else if (d.entities == "NONE") Color(150, 200, 150) else Color(235, 110, 90), false)
             }
 
             txt(g2, "Level 0 is endless and empty. Some walls aren't solid — push into one to noclip out.", cx, (hh * 0.715).toInt(),
@@ -108,11 +108,11 @@ fun main(args: Array<String>) {
             val n = net
             val status = when {
                 n == null -> "OFFLINE · SOLO"; n.state == 0 -> "CONNECTING…"
-                n.state == 1 -> "ONLINE · ${n.others.size + 1} PLAYERS${if (g.level == 0) " · ISOLATED" else ""}"; else -> "CONNECTION LOST"
+                n.state == 1 -> "ONLINE · ${n.others.size + 1} PLAYERS${if (g.isolated()) " · ISOLATED" else ""}"; else -> "CONNECTION LOST"
             }
             g2.color = Color(0, 0, 0, 120); g2.fillRoundRect(14, 14, sz * 19, sz * 4 + 18, 12, 12)
             g2.color = ac; g2.fillRoundRect(14, 14, 5, sz * 4 + 18, 4, 4)
-            txt(g2, "LEVEL ${d.id}  ·  ${d.name}", 30, 14 + sz + 6, spaced(Font("SansSerif", Font.BOLD, sz), 0.2f), ac, false)
+            txt(g2, "${d.label}  ·  ${d.name}", 30, 14 + sz + 6, spaced(Font("SansSerif", Font.BOLD, sz), 0.2f), ac, false)
             txt(g2, status, 30, 14 + 2 * sz + 10, Font("SansSerif", Font.PLAIN, sz - 1), Color(225, 215, 180), false)
             txt(g2, "${fps.toInt()} FPS", 30, 14 + 3 * sz + 14, Font("SansSerif", Font.PLAIN, sz - 3), Color(160, 155, 130), false)
 
@@ -122,10 +122,17 @@ fun main(args: Array<String>) {
                 val al = min(1.0, min(g.levelT / 0.8, (4.5 - g.levelT) / 1.0)).coerceIn(0.0, 1.0)
                 val c1 = Color(ac.red, ac.green, ac.blue, (al * 255).toInt())
                 txt(g2, g.arrival, w / 2, (hh * 0.30).toInt(), spaced(Font("SansSerif", Font.PLAIN, hh / 42), 0.3f), Color(220, 215, 195, (al * 255).toInt()))
-                txt(g2, "LEVEL ${d.id}", w / 2, (hh * 0.40).toInt(), spaced(Font("Serif", Font.BOLD, hh / 12), 0.3f), c1)
+                txt(g2, "${d.label}", w / 2, (hh * 0.40).toInt(), spaced(Font("Serif", Font.BOLD, hh / 12), 0.3f), c1)
                 g2.color = Color(ac.red, ac.green, ac.blue, (al * 160).toInt()); g2.fillRect(w / 2 - w / 12, (hh * 0.43).toInt(), w / 6, 2)
                 txt(g2, d.name, w / 2, (hh * 0.50).toInt(), spaced(Font("SansSerif", Font.PLAIN, hh / 26), 0.4f), Color(240, 235, 215, (al * 255).toInt()))
+                txt(g2, d.blurb, w / 2, (hh * 0.57).toInt(), Font("SansSerif", Font.ITALIC, hh / 40), Color(215, 208, 185, (al * 255).toInt()))
             }
+            if (g.manilaT in 0.01..4.5) {
+                val al = min(1.0, min(g.manilaT / 0.6, (4.5 - g.manilaT) / 1.0)).coerceIn(0.0, 1.0)
+                txt(g2, "THE MANILA ROOM", w / 2, (hh * 0.24).toInt(), spaced(Font("Serif", Font.BOLD, hh / 20), 0.3f), Color(232, 206, 150, (al * 255).toInt()))
+                txt(g2, "ISOLATION LIFTED  ·  you are not alone here", w / 2, (hh * 0.29).toInt(), Font("SansSerif", Font.PLAIN, hh / 40), Color(235, 225, 200, (al * 255).toInt()))
+            }
+            if (g.manilaNear > 0.05) txt(g2, "…the air smells of old paper", w / 2, hh - 70, Font("SansSerif", Font.ITALIC, hh / 36), Color(232, 206, 150, (g.manilaNear * 220).toInt()))
             if (g.noclip > 0.03) {
                 val bw0 = w / 6
                 g2.color = Color(0, 0, 0, 140); g2.fillRect(w / 2 - bw0 / 2, hh / 2 + 28, bw0, 6)

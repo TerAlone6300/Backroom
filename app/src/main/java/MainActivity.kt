@@ -149,33 +149,33 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         pText.textAlign = Paint.Align.CENTER; pText.textSize = 11 * dp; pText.letterSpacing = 0.3f; pText.color = Color.rgb(220, 212, 185)
         c.drawText("POCKET EDITION  ·  MULTIPLAYER", w / 2, h * 0.23f, pText)
 
-        val cols = 4; val gap = 8 * dp; val cw = (w * 0.9f - gap * (cols - 1)) / cols; val ch = h * 0.20f
-        val x0 = (w - (cols * cw + gap * (cols - 1))) / 2; val top = h * 0.27f
+        val cols = 4; val gap = 6 * dp; val cw = (w * 0.92f - gap * (cols - 1)) / cols; val ch = h * 0.14f
+        val x0 = (w - (cols * cw + gap * (cols - 1))) / 2; val top = h * 0.26f
         for (i in LEVELS.indices) {
             val d = LEVELS[i]; val on = Progress.found[i]; val rc = cardRects[i]
             val l = x0 + (i % cols) * (cw + gap); val tp = top + (i / cols) * (ch + gap)
             rc.set(l, tp, l + cw, tp + ch)
-            pFill.style = Paint.Style.FILL; pFill.color = Color.argb(if (on) 175 else 130, 0, 0, 0); c.drawRoundRect(rc, 12 * dp, 12 * dp, pFill)
+            pFill.style = Paint.Style.FILL; pFill.color = Color.argb(if (on) 175 else 130, 0, 0, 0); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
             pFill.shader = LinearGradient(0f, rc.top, 0f, rc.bottom, acc(d, if (on) 70 else 20), acc(d, 0), Shader.TileMode.CLAMP)
-            c.drawRoundRect(rc, 12 * dp, 12 * dp, pFill); pFill.shader = null
+            c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill); pFill.shader = null
             pFill.style = Paint.Style.STROKE; pFill.strokeWidth = (if (on) 2.5f else 1.2f) * dp; pFill.color = acc(d, if (on) 255 else 90)
-            c.drawRoundRect(rc, 12 * dp, 12 * dp, pFill)
-            val tx = rc.left + 10 * dp
+            c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
+            val tx = rc.left + 8 * dp
             pText.textAlign = Paint.Align.LEFT; pText.letterSpacing = 0.2f; pText.typeface = Typeface.DEFAULT_BOLD
-            pText.textSize = 9 * dp; pText.color = if (on) acc(d) else acc(d, 120)
-            c.drawText(d.label, tx, rc.top + 17 * dp, pText)
-            pText.letterSpacing = 0.03f; pText.textSize = 13 * dp; pText.color = if (on) Color.WHITE else Color.rgb(150, 150, 150)
+            pText.textSize = 8 * dp; pText.color = if (on) acc(d) else acc(d, 120)
+            c.drawText(d.label, tx, rc.top + 13 * dp, pText)
+            pText.letterSpacing = 0.02f; pText.textSize = 11.5f * dp; pText.color = if (on) Color.WHITE else Color.rgb(150, 150, 150)
             val nm = if (on) d.name else "???"
-            while (pText.measureText(nm) > rc.width() - 18 * dp && pText.textSize > 8 * dp) pText.textSize -= 0.5f * dp
-            c.drawText(nm, tx, rc.top + 36 * dp, pText)
-            pText.textSize = 8.5f * dp; pText.letterSpacing = 0.1f
+            while (pText.measureText(nm) > rc.width() - 14 * dp && pText.textSize > 6 * dp) pText.textSize -= 0.5f * dp
+            c.drawText(nm, tx, rc.top + 29 * dp, pText)
+            pText.textSize = 7.5f * dp; pText.letterSpacing = 0.1f
             pText.color = if (!on) Color.rgb(120, 120, 120) else if (d.entities == "NONE") Color.rgb(150, 200, 150) else Color.rgb(235, 110, 90)
-            c.drawText(if (on) d.entities else "???", tx, rc.bottom - 10 * dp, pText)
+            c.drawText(if (on) d.entities else "???", tx, rc.bottom - 7 * dp, pText)
         }
 
         pText.textAlign = Paint.Align.CENTER; pText.typeface = Typeface.DEFAULT; pText.textSize = 11 * dp; pText.letterSpacing = 0.05f
         pText.color = Color.rgb(210, 200, 170)
-        c.drawText("Level 0 is endless and empty. Some walls aren't solid — push into one to noclip out.", w / 2, h * 0.755f, pText)
+        c.drawText("Level 0 is endless and empty. Some walls aren't solid — push into one to noclip out.", w / 2, h * 0.77f, pText)
         pText.typeface = Typeface.DEFAULT_BOLD
         val bw = w * 0.22f; val bh = 46 * dp; val by = h * 0.80f
         playRect.set(w / 2 - bw - 8 * dp, by, w / 2 - 8 * dp, by + bh)
@@ -196,7 +196,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         val n = net
         val status = when {
             n == null -> "OFFLINE · SOLO"; n.state == 0 -> "CONNECTING…"
-            n.state == 1 -> "ONLINE · ${n.others.size + 1} PLAYERS${if (g.level == 0) " · ISOLATED" else ""}"; else -> "CONNECTION LOST"
+            n.state == 1 -> "ONLINE · ${n.others.size + 1} PLAYERS${if (g.isolated()) " · ISOLATED" else ""}"; else -> "CONNECTION LOST"
         }
         pText.textSize = 10.5f * dp; pText.color = Color.rgb(225, 215, 180); c.drawText(status, 26 * dp, 50 * dp, pText)
         pText.textSize = 9.5f * dp; pText.color = Color.rgb(160, 155, 130); c.drawText("${fps.toInt()} FPS", 26 * dp, 66 * dp, pText)
@@ -218,6 +218,19 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             c.drawText("${d.label}", w / 2, h * 0.42f, pTitle)
             pText.letterSpacing = 0.35f; pText.textSize = 15 * dp; pText.color = Color.argb((al * 255).toInt(), 240, 235, 215)
             c.drawText(d.name, w / 2, h * 0.52f, pText)
+            pText.letterSpacing = 0.05f; pText.textSize = 11 * dp; pText.color = Color.argb((al * 255).toInt(), 215, 208, 185)
+            c.drawText(d.blurb, w / 2, h * 0.59f, pText)
+        }
+        if (g.manilaT in 0.01..4.5) {
+            val al = min(1.0, min(g.manilaT / 0.6, (4.5 - g.manilaT) / 1.0)).coerceIn(0.0, 1.0)
+            pTitle.color = Color.argb((al * 255).toInt(), 232, 206, 150); pTitle.textSize = h / 14f; pTitle.setShadowLayer(8f, 2f, 2f, Color.argb((al * 180).toInt(), 0, 0, 0))
+            c.drawText("THE MANILA ROOM", w / 2, h * 0.26f, pTitle)
+            pText.textAlign = Paint.Align.CENTER; pText.letterSpacing = 0.1f; pText.textSize = 12 * dp; pText.color = Color.argb((al * 255).toInt(), 235, 225, 200)
+            c.drawText("ISOLATION LIFTED · you are not alone here", w / 2, h * 0.33f, pText)
+        }
+        if (g.manilaNear > 0.05) {
+            pText.textAlign = Paint.Align.CENTER; pText.letterSpacing = 0.05f; pText.textSize = 12 * dp; pText.color = Color.argb((g.manilaNear * 220).toInt(), 232, 206, 150)
+            c.drawText("…the air smells of old paper", w / 2, h - 50 * dp, pText)
         }
         if (g.noclip > 0.03) {
             val bw0 = w / 6; pFill.style = Paint.Style.FILL

@@ -17,22 +17,43 @@ fun h(x: Int, y: Int, s: Int): Double {
 }
 
 // ---------- Levels ----------
-/** eType: 0 none, 1 Hound (chases on sight), 2 Smiler (moves when unseen), 3 Skin-Stealer (looks like a player, closes in) */
+/** eType: 0 none, 1 Hound (chases on sight), 2 Smiler (moves when unseen), 3 Skin-Stealer (looks like a player, closes in).
+ *  lantern: personal light that follows you. isolated: players cannot see each other on this level. */
 class LevelDef(val id: Int, val label: String, val name: String, val blurb: String, val entities: String, val eType: Int, val eCount: Int,
-               val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int)
+               val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
+               val lantern: Double = 0.0, val isolated: Boolean = false)
 
 val LEVELS = listOf(
-    LevelDef(0, "LEVEL 0", "THE LOBBY", "Endless yellow rooms. Humming lights. Damp carpet.", "NONE", 0, 0, 3, 0.18, 0.40, 0.015, intArrayOf(256, 256, 256), 0xF4E482),
+    LevelDef(0, "LEVEL 0", "THE LOBBY", "Endless yellow rooms. Humming lights. Nobody else can see you.", "NONE", 0, 0, 3, 0.18, 0.40, 0.015, intArrayOf(256, 256, 256), 0xF4E482, isolated = true),
     LevelDef(1, "LEVEL 1", "HABITABLE ZONE", "Cold concrete halls. Something is breathing in the dark.", "HOUNDS", 1, 3, 5, 0.17, 0.30, 0.018, intArrayOf(232, 250, 244), 0x9FD4C8),
     LevelDef(2, "LEVEL 2", "PIPE DREAMS", "Hot, rusted tunnels. Don't look away.", "SMILERS", 2, 2, 4, 0.07, 0.45, 0.030, intArrayOf(256, 205, 150), 0xF0A050),
     LevelDef(3, "LEVEL 3", "ELECTRICAL STATION", "Humming transformers in a grid of machines. Hunters follow the sparks.", "HOUNDS", 1, 4, 4, 0.06, 0.50, 0.028, intArrayOf(230, 240, 256), 0x6FA8FF),
-    LevelDef(4, "LEVEL 4", "ABANDONED OFFICE", "Dead cubicles, stained ceilings. Someone is still typing.", "SKIN-STEALERS", 3, 2, 4, 0.12, 0.38, 0.020, intArrayOf(256, 252, 240), 0xD8CFA8),
+    LevelDef(4, "LEVEL 4", "ABANDONED OFFICE", "Dead cubicles, stained ceilings. Someone is still typing.", "SKIN-STEALERS", 3, 2, 4, 0.18, 0.34, 0.018, intArrayOf(256, 252, 240), 0xD8CFA8),
     LevelDef(5, "LEVEL 5", "TERROR HOTEL", "Red carpet, endless corridors, a door for every secret.", "SMILERS", 2, 3, 4, 0.08, 0.45, 0.026, intArrayOf(256, 225, 190), 0xD04A4A),
-    LevelDef(6, "LEVEL 37", "THE POOLROOMS", "Warm tiled halls and still water. Finally, peace.", "NONE", 0, 0, 5, 0.55, 0.12, 0.006, intArrayOf(236, 250, 256), 0x6FD8E8)
+    LevelDef(6, "LEVEL 37", "THE POOLROOMS", "Warm tiled halls and still water. Finally, peace.", "NONE", 0, 0, 5, 0.55, 0.12, 0.006, intArrayOf(236, 250, 256), 0x6FD8E8),
+    LevelDef(7, "LEVEL 6", "LIGHTS OUT", "Pitch-dark halls. Your lantern is all you have.", "HOUNDS", 1, 2, 3, 0.015, 0.50, 0.030, intArrayOf(256, 246, 214), 0xE0C060, lantern = 1.1),
+    LevelDef(8, "LEVEL 75", "LIMINALITY", "Sand drifts through quiet corridors. You have been here before.", "NONE", 0, 0, 5, 0.42, 0.12, 0.010, intArrayOf(256, 244, 215), 0xE6C98A),
+    LevelDef(9, "LEVEL 139", "GRAYSCALE HALLS", "Colourless concrete. The paintings look back.", "NONE", 0, 0, 4, 0.14, 0.38, 0.016, intArrayOf(236, 236, 236), 0xBEBEBE),
+    LevelDef(10, "LEVEL 182", "CITY OF DUSK", "A sunset that never sets over empty concrete rooms.", "NONE", 0, 0, 4, 0.22, 0.18, 0.014, intArrayOf(256, 200, 150), 0xFF9A5A),
+    LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true)
 )
+
+/** The Manila Room: the one and only room of Level 0 where isolation does not apply. */
+object Manila {
+    const val CX = 1313; const val CY = -2024 // 9x9 interior starting here, door on the south side; unique in the endless level
+    fun inside(x: Double, y: Double) = x >= CX && x < CX + 9 && y >= CY && y < CY + 9
+    fun inBox(ix: Int, iy: Int) = ix in CX - 1..CX + 9 && iy in CY - 1..CY + 9
+    fun inClear(ix: Int, iy: Int) = ix in CX - 4..CX + 12 && iy in CY - 4..CY + 12 // room plus a free moat around it
+    fun wall(ix: Int, iy: Int): Boolean {
+        if (!inBox(ix, iy)) return false
+        val edge = ix == CX - 1 || ix == CX + 9 || iy == CY - 1 || iy == CY + 9
+        return edge && !(iy == CY + 9 && ix in CX + 3..CX + 5)
+    }
+}
 
 // ---------- Worlds: deterministic per level, so every device sees the same maze ----------
 private fun wall0(x: Int, y: Int): Boolean { // The Lobby: 6x6 rooms, 2-wide doors, pillars
+    if (Manila.inClear(x, y)) return Manila.wall(x, y)
     val bx = Math.floorDiv(x, 6); val by = Math.floorDiv(y, 6)
     val lx = Math.floorMod(x, 6); val ly = Math.floorMod(y, 6)
     if (lx == 0 && ly == 0) return true
@@ -95,12 +116,58 @@ private fun wall6(x: Int, y: Int): Boolean { // Poolrooms: bright halls, columns
     return false
 }
 
-fun isWall(lv: Int, x: Int, y: Int) = when (lv) {
-    0 -> wall0(x, y); 1 -> wall1(x, y); 2 -> wall2(x, y); 3 -> wall3(x, y); 4 -> wall4(x, y); 5 -> wall5(x, y); else -> wall6(x, y)
+/** Generic room grid: blocks of b cells, walls with probability p, doors dw cells wide. */
+private fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
+    val bx = Math.floorDiv(x, b); val by = Math.floorDiv(y, b)
+    val lx = Math.floorMod(x, b); val ly = Math.floorMod(y, b)
+    if (lx == 0 && ly == 0) return true
+    val span = b - dw - 1
+    val gv = 1 + (h(bx, by, s + 1) * span).toInt(); val gh = 1 + (h(bx, by, s + 3) * span).toInt()
+    if (lx == 0 && h(bx, by, s) < p && ly !in gv until gv + dw) return true
+    if (ly == 0 && h(bx, by, s + 2) < p && lx !in gh until gh + dw) return true
+    return false
 }
 
-/** A few walls are "not quite solid": push into one for a while and you noclip to the next level. */
-fun unstable(lv: Int, x: Int, y: Int) = isWall(lv, x, y) && h(x, y, 77 + lv) < 0.03
+fun isWall(lv: Int, x: Int, y: Int) = when (lv) {
+    0 -> wall0(x, y); 1 -> wall1(x, y); 2 -> wall2(x, y); 3 -> wall3(x, y); 4 -> wall4(x, y); 5 -> wall5(x, y); 6 -> wall6(x, y)
+    7 -> grid(x, y, 5, 110, 0.8, 2); 8 -> grid(x, y, 8, 120, 0.6, 3); 9 -> grid(x, y, 7, 130, 0.7, 2)
+    10 -> wall5(x + 37, y + 11); else -> grid(x, y, 4, 140, 0.9, 1)
+}
+
+/** Each level has exactly 3 not-quite-solid walls at fixed spots; each leads to a fixed level. */
+val NOCLIP_TARGETS = listOf(
+    intArrayOf(1, 7, 11), intArrayOf(2, 0, 9), intArrayOf(3, 1, 10), intArrayOf(4, 2, 11), intArrayOf(5, 3, 0),
+    intArrayOf(6, 4, 10), intArrayOf(8, 5, 0), intArrayOf(0, 1, 9), intArrayOf(6, 0, 10), intArrayOf(0, 2, 11),
+    intArrayOf(2, 5, 8), intArrayOf(3, 5, 8))
+
+val NOCLIPS: List<List<IntArray>> by lazy {
+    LEVELS.indices.map { lv ->
+        // Level 0: scattered around the Manila Room. Other levels: around the spawn area.
+        val ax = if (lv == 0) Manila.CX + 4 else 4; val ay = if (lv == 0) Manila.CY + 4 else 4
+        val out = ArrayList<IntArray>()
+        for (k in 0..2) {
+            val ang = lv * 1.3 + k * 2.094; val dist = if (lv == 0) 70.0 + k * 45 else 18.0 + k * 17
+            val sx = (ax + cos(ang) * dist).roundToInt(); val sy = (ay + sin(ang) * dist).roundToInt()
+            var best: IntArray? = null
+            search@ for (r in 0..40) for (dy in -r..r) for (dx in -r..r) {
+                if (max(abs(dx), abs(dy)) != r) continue
+                val cx = sx + dx; val cy = sy + dy
+                if (!isWall(lv, cx, cy) || (lv == 0 && Manila.inClear(cx, cy))) continue
+                val exposed = !(isWall(lv, cx + 1, cy) && isWall(lv, cx - 1, cy) && isWall(lv, cx, cy + 1) && isWall(lv, cx, cy - 1))
+                if (exposed && out.none { it[0] == cx && it[1] == cy }) { best = intArrayOf(cx, cy); break@search }
+            }
+            out.add(best ?: intArrayOf(sx, sy))
+        }
+        out
+    }
+}
+
+fun noclipIndex(lv: Int, x: Int, y: Int): Int {
+    val l = NOCLIPS[lv]
+    for (k in 0..2) if (l[k][0] == x && l[k][1] == y) return k
+    return -1
+}
+fun unstable(lv: Int, x: Int, y: Int) = noclipIndex(lv, x, y) >= 0
 
 object Progress { val found = BooleanArray(LEVELS.size).also { it[0] = true } } // levels discovered this session
 
@@ -139,16 +206,16 @@ class Game {
     var bob = 0.0; var bobAmp = 0.0
     var showMap = true
     var dead = false; var deadT = 0.0; var danger = 0.0
+    var near = 0.0; var manilaNear = 0.0; var manilaT = 0.0
     var noclip = 0.0; var flash = 0.0; var arrival = "YOU SLIPPED OUT OF REALITY"
     val entities = CopyOnWriteArrayList<Entity>()
     init { enter(0) }
 
-    private var ncx = 0; private var ncy = 0
-    /** Where a given unstable wall leads is fixed (same for every player), usually the next level, sometimes a jump. */
-    private fun noclipTarget(): Int {
-        val n = LEVELS.size; val r = h(ncx, ncy, 99 + level)
-        return if (r < 0.6) (level + 1) % n else (level + 1 + ((r * 1000).toInt() % (n - 1))) % n
-    }
+    /** True when other players cannot see you (Level 0 and Level 201), except inside the Manila Room. */
+    fun isolated() = LEVELS[level].isolated && !(level == 0 && Manila.inside(x, y))
+
+    private var ncK = 0
+    private fun noclipTarget() = NOCLIP_TARGETS[level][ncK]
 
     private fun findFree(cx: Double, cy: Double): Pair<Double, Double> {
         for (r in 0..40) for (dy in -r..r) for (dx in -r..r) {
@@ -163,9 +230,10 @@ class Game {
         level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
         Progress.found[lv] = true
-        // Level 0 is isolating: everyone lands thousands of cells apart in the endless maze.
+        // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
         // Other levels drop you near the origin so players can regroup.
-        val p = if (lv == 0) findFree((Math.random() - 0.5) * 40000, (Math.random() - 0.5) * 40000)
+        val p = if (lv == 0) { val ang0 = Math.random() * 6.283; val d0 = 60 + Math.random() * 200
+                               findFree(Manila.CX + 4.5 + cos(ang0) * d0, Manila.CY + 4.5 + sin(ang0) * d0) }
                 else findFree(4 + Math.random() * 3, 4 + Math.random() * 3)
         x = p.first; y = p.second
         entities.clear()
@@ -200,12 +268,18 @@ class Game {
             val mxn = cos(a) * f - sin(a) * s; val myn = sin(a) * f + cos(a) * s; val ml = hypot(mxn, myn)
             if (ml > 0.01) {
                 val cx = floor(x + mxn / ml * 0.34).toInt(); val cy = floor(y + myn / ml * 0.34).toInt()
-                pushing = unstable(level, cx, cy)
-                if (pushing) { ncx = cx; ncy = cy }
+                val k = noclipIndex(level, cx, cy)
+                pushing = k >= 0
+                if (pushing) ncK = k
             }
         }
         noclip = if (pushing) min(1.0, noclip + dt / 2.2) else max(0.0, noclip - dt * 1.2)
         if (noclip >= 1.0) { enter(noclipTarget(), "YOU NOCLIPPED THROUGH THE WALL"); flash = 1.0; return }
+
+        near = NOCLIPS[level].minOf { hypot(it[0] + 0.5 - x, it[1] + 0.5 - y) }.let { (1 - it / 22).coerceIn(0.0, 1.0) }
+        val inM = level == 0 && Manila.inside(x, y)
+        manilaNear = if (level == 0 && !inM) (1 - hypot(Manila.CX + 4.5 - x, Manila.CY + 4.5 - y) / 45).coerceIn(0.0, 1.0) else 0.0
+        manilaT = if (inM) manilaT + dt else 0.0
 
         var dg = 0.0
         for (e in entities) {
@@ -290,6 +364,16 @@ class Net(private val host: String, private val port: Int = PORT) {
 
 // ---------- Procedural textures (64x64), one set per level ----------
 fun pack(r: Int, g: Int, b: Int) = (0xFF shl 24) or (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)
+
+/** Colours and patterns for the data-driven levels (7..11). wp: wall pattern, fp: floor pattern. */
+class TexSpec(val w: IntArray, val f: IntArray, val c: IntArray, val p: IntArray, val wp: Int, val fp: Int)
+val SPECS = listOf(
+    TexSpec(intArrayOf(190, 170, 90), intArrayOf(100, 84, 44), intArrayOf(180, 170, 140), intArrayOf(255, 255, 200), 0, 0),   // 7  Lights Out
+    TexSpec(intArrayOf(222, 196, 138), intArrayOf(224, 192, 122), intArrayOf(205, 185, 135), intArrayOf(255, 246, 215), 2, 1), // 8  Liminality (sand)
+    TexSpec(intArrayOf(150, 150, 150), intArrayOf(95, 95, 95), intArrayOf(135, 135, 135), intArrayOf(235, 235, 235), 8, 3),    // 9  Grayscale Halls
+    TexSpec(intArrayOf(130, 126, 120), intArrayOf(88, 84, 80), intArrayOf(100, 96, 92), intArrayOf(255, 160, 90), 3, 0),      // 10 City of Dusk
+    TexSpec(intArrayOf(200, 200, 206), intArrayOf(168, 168, 176), intArrayOf(210, 210, 216), intArrayOf(255, 255, 255), 5, 3), // 11 Threshold
+)
 
 class TexSet(lv: Int) {
     val wall = IntArray(4096); val floor = IntArray(4096); val ceil = IntArray(4096); val panel = IntArray(4096)
@@ -391,7 +475,7 @@ class TexSet(lv: Int) {
                     ceil[i] = c(74.0, 56.0, 44.0, 0.8 + 0.3 * h(x, y, 94))
                     panel[i] = if (x < 12 || x > 51 || y < 12 || y > 51) pack(60, 40, 24) else pack(255, 205, 130)
                 }
-                else -> { // Poolrooms: glazed tile, blue band, still water, skylights
+                6 -> { // Poolrooms: glazed tile, blue band, still water, skylights
                     var r = 226.0; var g = 233.0; var b = 236.0
                     var f = 0.95 + 0.1 * h(x, y, 101)
                     if (x % 16 == 0 || y % 16 == 0) { r = 186.0; g = 198.0; b = 204.0 }
@@ -404,20 +488,62 @@ class TexSet(lv: Int) {
                     ceil[i] = c(232.0, 238.0, 240.0, (0.95 + 0.1 * h(x, y, 104)) * (if (x % 32 < 2 || y % 32 < 2) 0.85 else 1.0))
                     panel[i] = if (x < 4 || x > 59 || y < 4 || y > 59) pack(200, 210, 214) else pack(246, 253, 255)
                 }
+                99 -> { // Manila Room: everything the colour of old folders
+                    val f = 0.9 + 0.2 * h(x, y, 301) * (if (h(x, y / 9, 302) < 0.1) 0.9 else 1.0)
+                    wall[i] = c(226.0, 204.0, 150.0, f); floor[i] = c(214.0, 192.0, 138.0, f); ceil[i] = c(230.0, 210.0, 158.0, f)
+                    panel[i] = if (x < 5 || x > 58 || y < 5 || y > 58) pack(200, 180, 130) else pack(255, 240, 200)
+                }
+                else -> { // data-driven levels
+                    val sp = SPECS[lv - 7]
+                    var r = sp.w[0].toDouble(); var g = sp.w[1].toDouble(); var b = sp.w[2].toDouble()
+                    var f = (0.88 + 0.24 * h(x, y, 201 + lv)) * (0.94 + 0.12 * h(x / 4, y / 4, 202 + lv))
+                    when (sp.wp) {
+                        2 -> if (x % 32 == 0 || y % 32 == 0) f *= 0.8
+                        3 -> { // apartment block: concrete seams and lit windows
+                            if (x % 32 == 0) f *= 0.85
+                            if (x in 18..46 && y in 10..34) {
+                                if (x in 20..44 && y in 12..32) { r = 255.0; g = 170.0; b = 80.0; f = 1.0 + 0.2 * (1 - (y - 12) / 20.0) } else { r = 50.0; g = 46.0; b = 44.0 }
+                            }
+                        }
+                        5 -> { // triangle outlines
+                            val tx = x % 32; val ty = y % 32
+                            if (ty in 7..25 && abs(abs(tx - 16) - (ty - 6) / 2) < 1) f *= 0.55
+                        }
+                        8 -> { // framed pictures
+                            if (x in 10..53 && y in 8..42) {
+                                if (x in 13..50 && y in 11..39) { val v = 70 + 110 * h(x / 3, y / 3, 206); r = v; g = v; b = v; f = 1.0 } else { r = 40.0; g = 40.0; b = 40.0 }
+                            }
+                        }
+                    }
+                    wall[i] = c(r, g, b, f)
+                    var ff = 0.85 + 0.3 * h(x, y, 211 + lv)
+                    when (sp.fp) {
+                        1 -> ff *= 0.88 + 0.16 * sin((y + 3 * sin(x * 0.25)) * 0.7)           // sand ripples
+                        3 -> if (x % 16 == 0 || y % 16 == 0) ff *= 0.7                         // tile grout
+                    }
+                    floor[i] = c(sp.f[0].toDouble(), sp.f[1].toDouble(), sp.f[2].toDouble(), ff)
+                    var tf = 0.9 + 0.15 * h(x, y, 221 + lv); if (x < 2 || y < 2) tf *= 0.75
+                    ceil[i] = c(sp.c[0].toDouble(), sp.c[1].toDouble(), sp.c[2].toDouble(), tf)
+                    panel[i] = if (x < 5 || x > 58 || y < 5 || y > 58) pack(sp.p[0] * 3 / 4, sp.p[1] * 3 / 4, sp.p[2] * 3 / 4) else pack(sp.p[0], sp.p[1], sp.p[2])
+                }
             }
         }
     }
 }
 
 val TEX = Array(LEVELS.size) { TexSet(it) }
+val MANILA = TexSet(99)
 private val FLICKER = arrayOf(doubleArrayOf(0.12, 0.20, 0.27), doubleArrayOf(0.20, 0.28, 0.40), doubleArrayOf(0.15, 0.25, 0.32),
-    doubleArrayOf(0.25, 0.35, 0.45), doubleArrayOf(0.15, 0.22, 0.30), doubleArrayOf(0.18, 0.30, 0.38), doubleArrayOf(0.02, 0.05, 0.05))
+    doubleArrayOf(0.25, 0.35, 0.45), doubleArrayOf(0.15, 0.22, 0.30), doubleArrayOf(0.18, 0.30, 0.38), doubleArrayOf(0.02, 0.05, 0.05),
+    doubleArrayOf(0.02, 0.04, 0.95), doubleArrayOf(0.0, 0.02, 0.03), doubleArrayOf(0.10, 0.20, 0.28), doubleArrayOf(0.0, 0.05, 0.08),
+    doubleArrayOf(0.08, 0.16, 0.20))
 
 // ---------- Renderer: textured raycaster, pooled lighting, fog, look up/down, entities ----------
 class Renderer(val W: Int = 480, val H: Int = 270) {
     private val zb = DoubleArray(W)
     private val vig = IntArray(W * H)
     private var grain = 1234567
+    private var lpx = 0.0; private var lpy = 0.0; private var lant = 0.0
 
     init {
         for (y in 0 until H) for (x in 0 until W) {
@@ -448,7 +574,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
         val p = d.period
         val kx = floor((wx - 1.5) / p + 0.5).toInt(); val ky = floor((wy - 1.5) / p + 0.5).toInt()
         val ddx = wx - (kx * p + 1.5); val ddy = wy - (ky * p + 1.5)
-        return d.ambient + flick(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff)
+        return d.ambient + flick(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff) + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35)
     }
 
     private fun put(px: IntArray, xx: Int, yy: Int, col: Int, a: Int) {
@@ -494,6 +620,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
     fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
         val lv = g.level; val d = LEVELS[lv]; val ts = TEX[lv]; val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
+        lpx = x; lpy = y; lant = d.lantern
         val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
         val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.93) 0.5 else 1.0 // rare global flicker
         val dx = cos(a); val dy = sin(a); val plX = -dy * 0.66; val plY = dx * 0.66
@@ -509,11 +636,12 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
                 val cx = 2.0 * xx / W - 1
                 val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
                 val tx = ((wx - floor(wx)) * 64).toInt() and 63; val ty = ((wy - floor(wy)) * 64).toInt() and 63
-                val l = lightAt(d, wx, wy, t) * gl
-                px[yy * W + xx] = if (isFloor) mul(ts.floor[ty * 64 + tx], l * fog * 0.85 * (if (lv == 6) 0.85 + 0.2 * sin(wx * 9 + t * 1.5) * sin(wy * 9 + t * 1.1) else 1.0), tn)
+                val mt = if (lv == 0 && Manila.inside(wx, wy)) MANILA else ts
+                val l = if (mt === MANILA) 1.05 else lightAt(d, wx, wy, t) * gl
+                px[yy * W + xx] = if (isFloor) mul(mt.floor[ty * 64 + tx], l * fog * 0.85 * (if (lv == 6) 0.85 + 0.2 * sin(wx * 9 + t * 1.5) * sin(wy * 9 + t * 1.1) else 1.0), tn)
                 else if (Math.floorMod(floor(wx).toInt(), d.period) == 1 && Math.floorMod(floor(wy).toInt(), d.period) == 1)
-                    mul(ts.panel[ty * 64 + tx], l * max(fog, 0.6), tn)
-                else mul(ts.ceil[ty * 64 + tx], l * fog, tn)
+                    mul(mt.panel[ty * 64 + tx], l * max(fog, 0.6), tn)
+                else mul(mt.ceil[ty * 64 + tx], l * fog, tn)
             }
         }
 
@@ -532,27 +660,32 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
                 if (isWall(lv, mapX, mapY)) break
             }
             val unst = unstable(lv, mapX, mapY)
+            val wt = if (lv == 0 && Manila.inBox(mapX, mapY)) MANILA else ts
             val perp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
             zb[xx] = perp
             val hx = x + perp * rx; val hy = y + perp * ry
             var tx = (((if (side == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
             if ((side == 0 && rx > 0) || (side == 1 && ry < 0)) tx = 63 - tx
-            val br = lightAt(d, hx, hy, t) * gl / (1 + perp * perp * d.fogK) * (if (side == 1) 0.82 else 1.0)
+            val br = (if (wt === MANILA) 1.05 else lightAt(d, hx, hy, t) * gl) / (1 + perp * perp * d.fogK) * (if (side == 1) 0.82 else 1.0)
             val lineH = (H / perp).toInt().coerceAtLeast(1)
             val start = hz - lineH / 2
             for (yy in max(0, start)..min(H - 1, start + lineH)) {
                 val ty = ((yy - start).toLong() * 64 / lineH).toInt().coerceIn(0, 63)
                 if (unst) { // cold, wobbling texture = not solid
                     val tx2 = (tx + (sin(t * 11 + yy * 0.25) * 4).toInt()) and 63
-                    val c0 = mul(ts.wall[ty * 64 + tx2], br * (0.85 + 0.3 * sin(t * 7 + xx * 0.1)), tn)
+                    val c0 = mul(wt.wall[ty * 64 + tx2], br * (0.85 + 0.3 * sin(t * 7 + xx * 0.1)), tn)
                     px[yy * W + xx] = pack((((c0 shr 16) and 255) * 3) / 4, ((c0 shr 8) and 255) + 25, (c0 and 255) + 60)
-                } else px[yy * W + xx] = mul(ts.wall[ty * 64 + tx], br, tn)
+                } else px[yy * W + xx] = mul(wt.wall[ty * 64 + tx], br, tn)
             }
         }
 
         // sprites: other players on this level + this level's entities, far to near
         val items = ArrayList<DoubleArray>()
-        for (o in others) if (o.size > 2 && o[2].toInt() == lv) items.add(doubleArrayOf(o[0], o[1], 0.0))
+        for (o in others) if (o.size > 2 && o[2].toInt() == lv) {
+            // isolated levels hide other players, even right next to you (except inside the Manila Room)
+            if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
+            items.add(doubleArrayOf(o[0], o[1], 0.0))
+        }
         for (e in g.entities) items.add(doubleArrayOf(e.x, e.y, e.type.toDouble()))
         items.sortByDescending { hypot(it[0] - x, it[1] - y) }
         for (o in items) {
@@ -580,20 +713,22 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
         val rk = (dgr * 180).toInt()
         val fadeI = ((if (g.dead) (1 - g.deadT / 1.2).coerceIn(0.0, 1.0) else 1.0) * 256).toInt()
         val wash = ((g.noclip * g.noclip * 150) + g.flash * 255).toInt()
+        val amp = 1 + (g.near * 2).toInt()
         var s = grain
         for (i in px.indices) {
             val c = px[i]; val v = (vig[i] * fadeI) shr 8
             s = s * 1664525 + 1013904223
-            val nz = ((s ushr 28) and 15) - 8
+            val nz = (((s ushr 28) and 15) - 8) * amp
             val red = ((256 - vig[i]) * rk) shr 8
             px[i] = pack((((c shr 16) and 255) * v shr 8) + nz + red + wash, (((c shr 8) and 255) * v shr 8) + nz + wash, ((c and 255) * v shr 8) + nz + wash)
         }
         grain = s
-        if (g.noclip > 0.02) { // reality tearing: shifted scanlines
+        val gk = max(g.noclip, g.near * 0.3) // reality tears while noclipping, and faintly when a not-quite-solid wall is near
+        if (gk > 0.02) {
             var q = s
-            repeat((g.noclip * 50).toInt() + 1) {
+            repeat((gk * 50).toInt() + 1) {
                 q = q * 1664525 + 1013904223; val row = ((q ushr 8) and 0xFFFF) % H
-                q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * g.noclip * 0.35).toInt()
+                q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * gk * 0.35).toInt()
                 if (sh != 0) {
                     val base = row * W; val tmp = px.copyOfRange(base, base + W)
                     for (i in 0 until W) px[base + (((i + sh) % W) + W) % W] = tmp[i]
@@ -606,7 +741,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
 
     // ---------- shape-only HUD (text is drawn by each platform) ----------
     private fun drawHud(px: IntArray, g: Game, others: Collection<DoubleArray>) {
-        if (g.showMap && g.level != 0) { // there is no map of Level 0
+        if (g.showMap && !LEVELS[g.level].isolated) { // no maps on isolated levels
             val R = 8; val cs = 3; val size = (2 * R + 1) * cs
             val ox = W - size - 8; val oy = 8
             val fx = floor(g.x).toInt(); val fy = floor(g.y).toInt()
