@@ -169,7 +169,93 @@ fun noclipIndex(lv: Int, x: Int, y: Int): Int {
 }
 fun unstable(lv: Int, x: Int, y: Int) = noclipIndex(lv, x, y) >= 0
 
-object Progress { val found = BooleanArray(LEVELS.size).also { it[0] = true } } // levels discovered this session
+object Progress {
+    val found = BooleanArray(LEVELS.size).also { it[0] = true } // levels discovered (persisted by Store)
+    fun unlock(lv: Int) { if (!found[lv]) { found[lv] = true; Store.saveProfile() } }
+}
+
+// ---------- Menu screens (shared by both clients), settings, saves ----------
+enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME }
+
+object Settings {
+    const val FOV_MIN = 30; const val FOV_MAX = 110
+    @Volatile var fov = 60
+    val PRESETS = listOf(30 to "Narrow", 60 to "Normal", 110 to "Quake Pro")
+    fun set(f: Int) { fov = f.coerceIn(FOV_MIN, FOV_MAX) }
+    fun name(f: Int = fov) = PRESETS.firstOrNull { it.first == f }?.let { "${it.second} ($f)" } ?: "Custom ($f)"
+    fun frac(f: Int = fov) = (f - FOV_MIN).toDouble() / (FOV_MAX - FOV_MIN)
+    /** Slider position 0..1 -> FOV; sticks to a preset when within 2 degrees of it. */
+    fun fromFrac(t: Double): Int {
+        val f = (FOV_MIN + t.coerceIn(0.0, 1.0) * (FOV_MAX - FOV_MIN)).roundToInt()
+        return PRESETS.firstOrNull { abs(it.first - f) <= 2 }?.first ?: f
+    }
+}
+
+class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
+               val pitch: Double, val stamina: Double, val playSec: Double) {
+    fun info(): String {
+        val m = (playSec / 60).toInt()
+        val t = if (m < 1) "<1 min" else if (m < 60) "$m min" else "${m / 60}h ${"%02d".format(m % 60)}m"
+        return "${java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(stamp))}  ·  $t played"
+    }
+}
+
+/** Plain .properties files in a folder each platform provides: profile.properties (FOV + unlocked levels) and saves/<id>.properties. */
+object Store {
+    private var dir: File? = null
+    private fun load(f: File) = java.util.Properties().also { p -> f.inputStream().use { p.load(it) } }
+    private fun put(f: File, p: java.util.Properties) {
+        val tmp = File(f.path + ".tmp"); tmp.outputStream().use { p.store(it, null) }
+        if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+    }
+
+    fun init(d: File) {
+        dir = d; File(d, "saves").mkdirs()
+        runCatching {
+            val f = File(d, "profile.properties")
+            if (f.exists()) {
+                val p = load(f)
+                p.getProperty("fov")?.toIntOrNull()?.let { Settings.set(it) }
+                p.getProperty("found")?.split(",")?.forEach { s -> s.trim().toIntOrNull()?.let { if (it in Progress.found.indices) Progress.found[it] = true } }
+            }
+        }
+    }
+
+    fun saveProfile() {
+        val d = dir ?: return
+        runCatching {
+            put(File(d, "profile.properties"), java.util.Properties().apply {
+                setProperty("fov", Settings.fov.toString())
+                setProperty("found", Progress.found.indices.filter { Progress.found[it] }.joinToString(","))
+            })
+        }
+    }
+
+    fun list(): List<SaveData> {
+        val d = dir ?: return emptyList()
+        return (File(d, "saves").listFiles { f -> f.name.endsWith(".properties") } ?: emptyArray()).mapNotNull { f ->
+            runCatching {
+                val p = load(f)
+                SaveData(f.name.removeSuffix(".properties"), p.getProperty("stamp").toLong(), p.getProperty("level").toInt(),
+                    p.getProperty("x").toDouble(), p.getProperty("y").toDouble(), p.getProperty("a").toDouble(),
+                    p.getProperty("pitch").toDouble(), p.getProperty("stamina").toDouble(), p.getProperty("playSec").toDouble())
+            }.getOrNull()
+        }.sortedByDescending { it.stamp }
+    }
+
+    fun write(s: SaveData) {
+        val d = dir ?: return
+        runCatching {
+            put(File(File(d, "saves"), "${s.id}.properties"), java.util.Properties().apply {
+                setProperty("stamp", s.stamp.toString()); setProperty("level", s.level.toString())
+                setProperty("x", s.x.toString()); setProperty("y", s.y.toString()); setProperty("a", s.a.toString())
+                setProperty("pitch", s.pitch.toString()); setProperty("stamina", s.stamina.toString()); setProperty("playSec", s.playSec.toString())
+            })
+        }
+    }
+
+    fun delete(id: String) { val d = dir ?: return; File(File(d, "saves"), "$id.properties").delete() }
+}
 
 fun free(lv: Int, nx: Double, ny: Double, r: Double = 0.2) =
     !isWall(lv, floor(nx - r).toInt(), floor(ny - r).toInt()) && !isWall(lv, floor(nx + r).toInt(), floor(ny - r).toInt()) &&
@@ -208,6 +294,7 @@ class Game {
     var dead = false; var deadT = 0.0; var danger = 0.0
     var near = 0.0; var manilaNear = 0.0; var manilaT = 0.0
     var noclip = 0.0; var flash = 0.0; var arrival = "YOU SLIPPED OUT OF REALITY"
+    var playSec = 0.0 // total time actually played (paused time does not count), stored in saves
     val entities = CopyOnWriteArrayList<Entity>()
     init { enter(0) }
 
@@ -229,24 +316,42 @@ class Game {
     fun enter(lv: Int, arrived: String = "YOU SLIPPED OUT OF REALITY") {
         level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
-        Progress.found[lv] = true
+        Progress.unlock(lv)
         // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
         // Other levels drop you near the origin so players can regroup.
         val p = if (lv == 0) { val ang0 = Math.random() * 6.283; val d0 = 60 + Math.random() * 200
                                findFree(Manila.CX + 4.5 + cos(ang0) * d0, Manila.CY + 4.5 + sin(ang0) * d0) }
                 else findFree(4 + Math.random() * 3, 4 + Math.random() * 3)
         x = p.first; y = p.second
+        spawnEntities()
+    }
+
+    private fun spawnEntities() {
         entities.clear()
-        repeat(LEVELS[lv].eCount) {
+        repeat(LEVELS[level].eCount) {
             val ang = Math.random() * 6.283; val d = 11 + Math.random() * 8
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
-            entities.add(Entity(q.first, q.second, LEVELS[lv].eType))
+            entities.add(Entity(q.first, q.second, LEVELS[level].eType))
         }
+    }
+
+    fun newGame(lv: Int = 0) { playSec = 0.0; enter(lv) }
+
+    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec)
+
+    /** Resume a save: same level and spot; entities start fresh, 11+ cells away. */
+    fun restore(s: SaveData) {
+        level = s.level.coerceIn(0, LEVELS.size - 1); levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
+        arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
+        a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
+        Progress.unlock(level)
+        val p = findFree(s.x, s.y); x = p.first; y = p.second
+        spawnEntities()
     }
 
     /** fwd/str in -1..1 (analog), turn in rad/s */
     fun update(dt: Double, fwd: Double, str: Double, turn: Double, sprint: Boolean) {
-        levelT += dt; flash = max(0.0, flash - dt / 1.2)
+        levelT += dt; playSec += dt; flash = max(0.0, flash - dt / 1.2)
         if (dead) { deadT += dt; if (deadT > 3.5) enter(level); return }
         a += turn * dt
         pitch = pitch.coerceIn(-1.0, 1.0)
@@ -623,13 +728,15 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
         lpx = x; lpy = y; lant = d.lantern
         val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
         val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.93) 0.5 else 1.0 // rare global flicker
-        val dx = cos(a); val dy = sin(a); val plX = -dy * 0.66; val plY = dx * 0.66
+        val dx = cos(a); val dy = sin(a)
+        val pl = tan(Math.toRadians(Settings.fov / 2.0)); val vs = 0.66 / pl // camera plane length from FOV; vs keeps heights in proportion
+        val plX = -dy * pl; val plY = dx * pl
 
         // floor + ceiling
         for (yy in 0 until H) {
             val dr = yy - hz
             if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
-            val rd = 0.5 * H / abs(dr)
+            val rd = 0.5 * H * vs / abs(dr)
             val fog = 1.0 / (1 + rd * rd * d.fogK)
             val isFloor = dr > 0
             for (xx in 0 until W) {
@@ -667,7 +774,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
             var tx = (((if (side == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
             if ((side == 0 && rx > 0) || (side == 1 && ry < 0)) tx = 63 - tx
             val br = (if (wt === MANILA) 1.05 else lightAt(d, hx, hy, t) * gl) / (1 + perp * perp * d.fogK) * (if (side == 1) 0.82 else 1.0)
-            val lineH = (H / perp).toInt().coerceAtLeast(1)
+            val lineH = (H * vs / perp).toInt().coerceAtLeast(1)
             val start = hz - lineH / 2
             for (yy in max(0, start)..min(H - 1, start + lineH)) {
                 val ty = ((yy - start).toLong() * 64 / lineH).toInt().coerceIn(0, 63)
@@ -693,7 +800,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
             val inv = 1.0 / (plX * dy - dx * plY)
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
-            val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H / ty
+            val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
             val sh = (full * (if (type == 1) 0.6 else 0.9)).toInt().coerceAtLeast(2)
             val sw = (sh * (if (type == 1) 1.7 else if (type == 2) 0.5 else 0.42)).toInt().coerceAtLeast(2)
             val bottom = hz + (full / 2).toInt(); val top = bottom - sh
