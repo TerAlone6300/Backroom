@@ -128,25 +128,48 @@ private fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     return false
 }
 
-fun isWall(lv: Int, x: Int, y: Int) = when (lv) {
+private fun baseWall(lv: Int, x: Int, y: Int) = when (lv) {
     0 -> wall0(x, y); 1 -> wall1(x, y); 2 -> wall2(x, y); 3 -> wall3(x, y); 4 -> wall4(x, y); 5 -> wall5(x, y); 6 -> wall6(x, y)
     7 -> grid(x, y, 5, 110, 0.8, 2); 8 -> grid(x, y, 8, 120, 0.6, 3); 9 -> grid(x, y, 7, 130, 0.7, 2)
     10 -> wall5(x + 37, y + 11); else -> grid(x, y, 4, 140, 0.9, 1)
 }
 
-/** Each level has exactly 3 not-quite-solid walls at fixed spots; each leads to a fixed level. */
+// Every so often a long straight hallway (3 wide, 36-60 cells) is cut through the maze. One candidate per 96x96 sector.
+private const val SECT = 96
+/** 0 = maze as usual, 1 = hallway side wall, 2 = hallway floor (including a 3-cell opening at each end so it joins the maze). */
+private fun hallway(lv: Int, x: Int, y: Int): Int {
+    val sx = Math.floorDiv(x, SECT); val sy = Math.floorDiv(y, SECT); val q = lv * 7
+    if (h(sx, sy, 500 + q) > 0.38) return 0
+    val horiz = h(sx, sy, 501 + q) < 0.5
+    val len = 36 + (h(sx, sy, 502 + q) * 25).toInt()
+    val a0 = 6 + (h(sx, sy, 503 + q) * (SECT - len - 12)).toInt() // start along the hallway
+    val p0 = 6 + (h(sx, sy, 504 + q) * (SECT - 18)).toInt()       // first side wall across it
+    val lx = Math.floorMod(x, SECT); val ly = Math.floorMod(y, SECT)
+    val u = if (horiz) lx else ly; val v = if (horiz) ly else lx
+    if (v < p0 || v > p0 + 4 || u < a0 - 3 || u >= a0 + len + 3) return 0
+    if (v == p0 || v == p0 + 4) return if (u in a0 until a0 + len) 1 else 0
+    return 2
+}
+
+fun isWall(lv: Int, x: Int, y: Int): Boolean {
+    if (lv == 0 && Manila.inClear(x, y)) return baseWall(lv, x, y) // the Manila Room stays untouched
+    return when (hallway(lv, x, y)) { 1 -> true; 2 -> false; else -> baseWall(lv, x, y) }
+}
+
+/** Each level has exactly 4 not-quite-solid walls at fixed spots; each leads to a fixed level. */
 val NOCLIP_TARGETS = listOf(
-    intArrayOf(1, 7, 11), intArrayOf(2, 0, 9), intArrayOf(3, 1, 10), intArrayOf(4, 2, 11), intArrayOf(5, 3, 0),
-    intArrayOf(6, 4, 10), intArrayOf(8, 5, 0), intArrayOf(0, 1, 9), intArrayOf(6, 0, 10), intArrayOf(0, 2, 11),
-    intArrayOf(2, 5, 8), intArrayOf(3, 5, 8))
+    intArrayOf(1, 7, 11, 5), intArrayOf(2, 0, 9, 6), intArrayOf(3, 1, 10, 4), intArrayOf(4, 2, 11, 8), intArrayOf(5, 3, 0, 7),
+    intArrayOf(6, 4, 10, 2), intArrayOf(8, 5, 0, 3), intArrayOf(0, 1, 9, 10), intArrayOf(6, 0, 10, 4), intArrayOf(0, 2, 11, 8),
+    intArrayOf(2, 5, 8, 0), intArrayOf(3, 5, 8, 9))
 
 val NOCLIPS: List<List<IntArray>> by lazy {
     LEVELS.indices.map { lv ->
         // Level 0: scattered around the Manila Room. Other levels: around the spawn area.
         val ax = if (lv == 0) Manila.CX + 4 else 4; val ay = if (lv == 0) Manila.CY + 4 else 4
         val out = ArrayList<IntArray>()
-        for (k in 0..2) {
-            val ang = lv * 1.3 + k * 2.094; val dist = if (lv == 0) 70.0 + k * 45 else 18.0 + k * 17
+        val dists = if (lv == 0) doubleArrayOf(70.0, 115.0, 160.0, 92.0) else doubleArrayOf(18.0, 35.0, 52.0, 27.0)
+        for (k in 0..3) {
+            val ang = lv * 1.3 + k * 2.094 + (if (k == 3) 1.047 else 0.0); val dist = dists[k]
             val sx = (ax + cos(ang) * dist).roundToInt(); val sy = (ay + sin(ang) * dist).roundToInt()
             var best: IntArray? = null
             search@ for (r in 0..40) for (dy in -r..r) for (dx in -r..r) {
@@ -164,7 +187,7 @@ val NOCLIPS: List<List<IntArray>> by lazy {
 
 fun noclipIndex(lv: Int, x: Int, y: Int): Int {
     val l = NOCLIPS[lv]
-    for (k in 0..2) if (l[k][0] == x && l[k][1] == y) return k
+    for (k in l.indices) if (l[k][0] == x && l[k][1] == y) return k
     return -1
 }
 fun unstable(lv: Int, x: Int, y: Int) = noclipIndex(lv, x, y) >= 0
@@ -293,6 +316,7 @@ class Game {
     var showMap = true
     var dead = false; var deadT = 0.0; var danger = 0.0
     var near = 0.0; var manilaNear = 0.0; var manilaT = 0.0
+    var presence = 0.0 // 0..1: how close the nearest entity is; lamps stutter more the closer it gets
     var noclip = 0.0; var flash = 0.0; var arrival = "YOU SLIPPED OUT OF REALITY"
     var playSec = 0.0 // total time actually played (paused time does not count), stored in saves
     val entities = CopyOnWriteArrayList<Entity>()
@@ -327,7 +351,7 @@ class Game {
     }
 
     private fun spawnEntities() {
-        entities.clear()
+        entities.clear(); presence = 0.0
         repeat(LEVELS[level].eCount) {
             val ang = Math.random() * 6.283; val d = 11 + Math.random() * 8
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
@@ -360,8 +384,8 @@ class Game {
         if (len > 1) { f /= len; s /= len }
         val moving = len > 0.1
         val run = sprint && moving && !exhausted
-        if (run) { stamina -= 0.28 * dt; if (stamina <= 0) { stamina = 0.0; exhausted = true } }
-        else { stamina = min(1.0, stamina + 0.16 * dt); if (exhausted && stamina > 0.3) exhausted = false }
+        if (run) { stamina -= 0.10 * dt; if (stamina <= 0) { stamina = 0.0; exhausted = true } }
+        else { stamina = min(1.0, stamina + 0.20 * dt); if (exhausted && stamina > 0.3) exhausted = false }
         val speed = if (run) 4.2 else 2.3
         move(level, x, y, cos(a) * f - sin(a) * s, sin(a) * f + cos(a) * s, speed * dt).let { x = it.first; y = it.second }
         if (moving) bob += dt * (if (run) 12.0 else 7.5)
@@ -386,9 +410,10 @@ class Game {
         manilaNear = if (level == 0 && !inM) (1 - hypot(Manila.CX + 4.5 - x, Manila.CY + 4.5 - y) / 45).coerceIn(0.0, 1.0) else 0.0
         manilaT = if (inM) manilaT + dt else 0.0
 
-        var dg = 0.0
+        var dg = 0.0; var pr = 0.0
         for (e in entities) {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
+            pr = max(pr, 1 - d / 12)
             if (e.type == 3) { // Skin-Stealer: walks like a player, patiently closes in
                 if (d < 16 && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
@@ -412,6 +437,7 @@ class Game {
             if (d < 0.6) { dead = true; deadT = 0.0 }
         }
         danger = dg.coerceIn(0.0, 1.0)
+        presence += (pr - presence) * min(1.0, dt * 3)
     }
 }
 
@@ -648,7 +674,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
     private val zb = DoubleArray(W)
     private val vig = IntArray(W * H)
     private var grain = 1234567
-    private var lpx = 0.0; private var lpy = 0.0; private var lant = 0.0
+    private var lpx = 0.0; private var lpy = 0.0; private var lant = 0.0; private var pres = 0.0
 
     init {
         for (y in 0 until H) for (x in 0 until W) {
@@ -667,11 +693,17 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
     private fun flick(lv: Int, kx: Int, ky: Int, t: Double): Double {
         val v = h(kx, ky, 9 + lv * 13); val th = FLICKER[lv]
         return when {
-            v < th[0] -> if (sin(t * (14 + v * 60) + v * 50) > 0.2) 0.2 else 1.0 // broken, stuttering
-            v < th[1] -> 0.92 + 0.08 * sin(t * 40)                               // humming
+            v < th[0] * 0.4 -> if (sin(t * (6 + v * 20) + v * 50) > 0.5) 0.45 else 1.0 // broken: few, slow, shallow stutter
+            v < th[1] -> 0.96 + 0.04 * sin(t * 40)                                    // humming (barely visible)
             v < th[2] -> 0.0                                                     // dead
             else -> 1.0
         }
+    }
+
+    /** Lamps near an entity stutter: more of them, and for longer, the closer it is. 1.0 = steady. */
+    private fun spook(kx: Int, ky: Int, t: Double): Double {
+        if (pres < 0.02 || h(kx, ky, 77) > pres * 1.3) return 1.0
+        return if (sin(t * (16 + h(kx, ky, 78) * 30) + h(kx, ky, 79) * 20) > 0.7 - pres) 0.1 else 1.0
     }
 
     /** Light pooled around each ceiling panel (one every `period` cells). */
@@ -679,7 +711,7 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
         val p = d.period
         val kx = floor((wx - 1.5) / p + 0.5).toInt(); val ky = floor((wy - 1.5) / p + 0.5).toInt()
         val ddx = wx - (kx * p + 1.5); val ddy = wy - (ky * p + 1.5)
-        return d.ambient + flick(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff) + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35)
+        return d.ambient + flick(d.id, kx, ky, t) * spook(kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff) + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35)
     }
 
     private fun put(px: IntArray, xx: Int, yy: Int, col: Int, a: Int) {
@@ -725,9 +757,9 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
     fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
         val lv = g.level; val d = LEVELS[lv]; val ts = TEX[lv]; val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
-        lpx = x; lpy = y; lant = d.lantern
+        lpx = x; lpy = y; lant = d.lantern; pres = g.presence
         val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
-        val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.93) 0.5 else 1.0 // rare global flicker
+        val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.985) 0.75 else 1.0 // very rare, mild global flicker
         val dx = cos(a); val dy = sin(a)
         val pl = tan(Math.toRadians(Settings.fov / 2.0)); val vs = 0.66 / pl // camera plane length from FOV; vs keeps heights in proportion
         val plX = -dy * pl; val plY = dx * pl
