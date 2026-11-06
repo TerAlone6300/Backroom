@@ -46,7 +46,7 @@ fun main(args: Array<String>) {
     val ip = StringBuilder(args.firstOrNull() ?: "")
     var slot: String? = null; var optBack = Scr.MAIN; var saves: List<SaveData> = emptyList()
     var levelsOpen = false; var levelsAnim = 0.0; var scrollY = 0
-    var sliderR: Rectangle? = null; var sliding = false; var mpos = Point(-1, -1)
+    var fovR: Rectangle? = null; var fogR: Rectangle? = null; var slideId = 0 /* 0 none, 1 FOV, 2 fog */; var mpos = Point(-1, -1)
     val hits = ArrayList<Pair<Rectangle, () -> Unit>>() // rebuilt on every paint; the newest (topmost) one containing the click wins
     val robot = try { Robot() } catch (_: Exception) { null }
     val blank = Toolkit.getDefaultToolkit().createCustomCursor(BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB), Point(0, 0), "blank")
@@ -96,7 +96,7 @@ fun main(args: Array<String>) {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
             g2.drawImage(img, 0, 0, width, height, null)
-            hits.clear(); sliderR = null
+            hits.clear(); fovR = null; fogR = null
             when (scr) {
                 Scr.GAME -> drawHud(g2)
                 Scr.PAUSE -> drawPause(g2)
@@ -243,25 +243,44 @@ fun main(args: Array<String>) {
             btn(g2, Rectangle(cx - 90, hh - bb - hh / 40, 180, bb), "BACK", false, ac) { scr = Scr.MAIN }
         }
 
+        /** Labelled slider; returns its touch rectangle. ticks = (position 0..1, label, highlighted). */
+        fun slider(g2: Graphics2D, title: String, value: String, tl: Int, tr: Int, yTitle: Int, yTrack: Int, frac: Double, ticks: List<Triple<Double, String, Boolean>>): Rectangle {
+            val hh = height; val ac = Color(LEVELS[0].accent)
+            txt(g2, title, tl, yTitle, spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            val vf = Font("SansSerif", Font.BOLD, hh / 36)
+            txt(g2, value, tr - g2.getFontMetrics(vf).stringWidth(value), yTitle, vf, Color.WHITE, false)
+            g2.color = Color(255, 255, 255, 110); g2.fillRoundRect(tl, yTrack - 2, tr - tl, 4, 4, 4)
+            val kx = tl + ((tr - tl) * frac).toInt()
+            g2.color = ac; g2.fillRoundRect(tl, yTrack - 2, kx - tl, 4, 4, 4)
+            for ((f, nm, on) in ticks) {
+                val x = tl + ((tr - tl) * f).toInt()
+                g2.color = Color(255, 255, 255, 160); g2.fillRect(x - 1, yTrack - 8, 2, 16)
+                txt(g2, nm, x, yTrack + hh / 18, Font("SansSerif", if (on) Font.BOLD else Font.PLAIN, hh / 50), if (on) ac else Color(190, 185, 160))
+            }
+            g2.color = Color.WHITE; g2.fillOval(kx - 11, yTrack - 11, 22, 22)
+            g2.stroke = BasicStroke(3f); g2.color = ac; g2.drawOval(kx - 11, yTrack - 11, 22, 22)
+            return Rectangle(tl, yTrack - 20, tr - tl, 40)
+        }
+
         fun drawOptions(g2: Graphics2D) {
             val w = width; val hh = height; val cx = w / 2; val ac = Color(LEVELS[0].accent)
             dim(g2, 220, 200)
-            heading(g2, "OPTIONS", ac, 0.17)
-            txt(g2, "FIELD OF VIEW", cx, (hh * 0.36).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 40), 0.3f), Color(220, 212, 185))
-            txt(g2, Settings.name(), cx, (hh * 0.36).toInt() + hh / 12, Font("SansSerif", Font.BOLD, hh / 22), Color.WHITE)
-            val tl = (w * 0.25).toInt(); val tr = (w * 0.75).toInt(); val ty = (hh * 0.60).toInt()
-            sliderR = Rectangle(tl, ty - 20, tr - tl, 40)
-            g2.color = Color(255, 255, 255, 110); g2.fillRoundRect(tl, ty - 2, tr - tl, 4, 4, 4)
-            val kx = tl + ((tr - tl) * Settings.frac()).toInt()
-            g2.color = ac; g2.fillRoundRect(tl, ty - 2, kx - tl, 4, 4, 4)
-            for ((fv, nm) in Settings.PRESETS) {
-                val x = tl + ((tr - tl) * Settings.frac(fv)).toInt()
-                g2.color = Color(255, 255, 255, 160); g2.fillRect(x - 1, ty - 9, 2, 18)
-                txt(g2, "$nm ($fv)", x, ty + hh / 16, Font("SansSerif", if (Settings.fov == fv) Font.BOLD else Font.PLAIN, hh / 44), if (Settings.fov == fv) ac else Color(190, 185, 160))
+            heading(g2, "OPTIONS", ac, 0.15)
+            val tl = (w * 0.10).toInt(); val tr = (w * 0.55).toInt()
+            fovR = slider(g2, "FIELD OF VIEW", Settings.name(), tl, tr, (hh * 0.30).toInt(), (hh * 0.38).toInt(), Settings.frac(),
+                Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f), "$nm ($f)", Settings.fov == f) })
+            fogR = slider(g2, "FOG", Settings.fogName(), tl, tr, (hh * 0.56).toInt(), (hh * 0.64).toInt(), Settings.fog / 100.0,
+                Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100.0, nm, Settings.fog == f) })
+            // difficulty
+            val dl = (w * 0.64).toInt(); val dw = (w * 0.28).toInt(); val bh = hh / 14; val gp = hh / 90; var y = (hh * 0.34).toInt()
+            txt(g2, "DIFFICULTY", dl, (hh * 0.30).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            val cols = arrayOf(Color(150, 200, 150), ac, Color(240, 160, 80), Color(235, 70, 55))
+            for (i in DIFFS.indices) {
+                btn(g2, Rectangle(dl, y, dw, bh), DIFFS[i].name.uppercase(), Settings.diff == i, cols[i]) { Settings.putDiff(i); Store.saveProfile() }
+                y += bh + gp
             }
-            g2.color = Color.WHITE; g2.fillOval(kx - 12, ty - 12, 24, 24)
-            g2.stroke = BasicStroke(3f); g2.color = ac; g2.drawOval(kx - 12, ty - 12, 24, 24)
-            txt(g2, "drag the slider  ·  LEFT / RIGHT  fine tune", cx, (hh * 0.80).toInt(), Font("SansSerif", Font.ITALIC, hh / 48), Color(200, 195, 160))
+            txt(g2, DIFFS[Settings.diff].blurb, dl, y + hh / 30, Font("SansSerif", Font.ITALIC, hh / 50), Color(200, 195, 160), false)
+            txt(g2, "drag the sliders  ·  LEFT / RIGHT  fine tune FOV", cx, hh - hh / 7, Font("SansSerif", Font.ITALIC, hh / 56), Color(170, 165, 140))
             val bb = hh / 14
             btn(g2, Rectangle(cx - 90, hh - bb - hh / 40, 180, bb), "BACK", false, ac) { closeOptions() }
         }
@@ -348,17 +367,22 @@ fun main(args: Array<String>) {
             if (scr == Scr.MULTI && (e.keyChar.isLetterOrDigit() || e.keyChar in ".:-_") && ip.length < 40) ip.append(e.keyChar)
         }
     })
-    fun setFov(x: Int) { val sr = sliderR ?: return; Settings.set(Settings.fromFrac((x - sr.x).toDouble() / sr.width)) }
+    fun setSlider(id: Int, x: Int) {
+        val sr = (if (id == 1) fovR else fogR) ?: return
+        val t = (x - sr.x).toDouble() / sr.width
+        if (id == 1) Settings.set(Settings.fromFrac(t)) else Settings.putFog(Settings.fogFromFrac(t))
+    }
     val mouse = object : MouseAdapter() {
         override fun mousePressed(e: MouseEvent) {
             if (scr == Scr.GAME || e.button != MouseEvent.BUTTON1) return
-            val sr = sliderR
-            if (scr == Scr.OPTIONS && sr != null && Rectangle(sr.x - 16, sr.y, sr.width + 32, sr.height).contains(e.point)) { sliding = true; setFov(e.x) }
+            fun near(sr: Rectangle?) = sr != null && Rectangle(sr.x - 16, sr.y, sr.width + 32, sr.height).contains(e.point)
+            slideId = if (scr != Scr.OPTIONS) 0 else if (near(fovR)) 1 else if (near(fogR)) 2 else 0
+            if (slideId != 0) setSlider(slideId, e.x)
             else hits.lastOrNull { it.first.contains(e.point) }?.second?.invoke()
         }
-        override fun mouseDragged(e: MouseEvent) { mpos = e.point; if (sliding) setFov(e.x) }
+        override fun mouseDragged(e: MouseEvent) { mpos = e.point; if (slideId != 0) setSlider(slideId, e.x) }
         override fun mouseMoved(e: MouseEvent) { mpos = e.point }
-        override fun mouseReleased(e: MouseEvent) { if (sliding) { sliding = false; Store.saveProfile() } }
+        override fun mouseReleased(e: MouseEvent) { if (slideId != 0) { slideId = 0; Store.saveProfile() } }
         override fun mouseWheelMoved(e: MouseWheelEvent) { scrollY += e.wheelRotation * 40 }
     }
     panel.addMouseListener(mouse); panel.addMouseMotionListener(mouse); panel.addMouseWheelListener(mouse)

@@ -21,7 +21,9 @@ fun h(x: Int, y: Int, s: Int): Double {
  *  lantern: personal light that follows you. isolated: players cannot see each other on this level. */
 class LevelDef(val id: Int, val label: String, val name: String, val blurb: String, val entities: String, val eType: Int, val eCount: Int,
                val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
-               val lantern: Double = 0.0, val isolated: Boolean = false)
+               val lantern: Double = 0.0, val isolated: Boolean = false) {
+    val ip = 1.0 / period
+}
 
 val LEVELS = listOf(
     LevelDef(0, "LEVEL 0", "THE LOBBY", "Endless yellow rooms. Humming lights. Nobody else can see you.", "NONE", 0, 0, 3, 0.18, 0.40, 0.015, intArrayOf(256, 256, 256), 0xF4E482, isolated = true),
@@ -151,10 +153,32 @@ private fun hallway(lv: Int, x: Int, y: Int): Int {
     return 2
 }
 
-fun isWall(lv: Int, x: Int, y: Int): Boolean {
+private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
     if (lv == 0 && Manila.inClear(x, y)) return baseWall(lv, x, y) // the Manila Room stays untouched
     return when (hallway(lv, x, y)) { 1 -> true; 2 -> false; else -> baseWall(lv, x, y) }
 }
+
+// The maze is a pure function of (level, x, y) but costs several hashes per cell, so it is cached in 32x32 chunks.
+// Chunks are immutable once published, so any thread may read them (renderer workers, game thread, UI thread).
+private class Chunk(val lv: Int, val cx: Int, val cy: Int, val w: BooleanArray)
+private val chunks = java.util.concurrent.atomic.AtomicReferenceArray<Chunk?>(1024)
+@Volatile private var chunkMiss = 0
+
+private fun chunk(lv: Int, cx: Int, cy: Int): Chunk {
+    val i = ((cx * 73856093) xor (cy * 19349663) xor (lv * 83492791)) and 1023
+    var free = -1
+    for (k in 0..3) { // 4-way probing so two busy chunks never evict each other
+        val j = (i + k) and 1023; val c = chunks.get(j)
+        if (c == null) { if (free < 0) free = j } else if (c.cx == cx && c.cy == cy && c.lv == lv) return c
+    }
+    val a = BooleanArray(1024); val x0 = cx shl 5; val y0 = cy shl 5
+    for (j in 0 until 32) for (k in 0 until 32) a[j * 32 + k] = rawWall(lv, x0 + k, y0 + j)
+    val n = Chunk(lv, cx, cy, a)
+    chunks.set(if (free >= 0) free else (i + (chunkMiss++ and 3)) and 1023, n)
+    return n
+}
+
+fun isWall(lv: Int, x: Int, y: Int): Boolean = chunk(lv, x shr 5, y shr 5).w[((y and 31) shl 5) or (x and 31)]
 
 /** Each level has exactly 4 not-quite-solid walls at fixed spots; each leads to a fixed level. */
 val NOCLIP_TARGETS = listOf(
@@ -203,6 +227,17 @@ enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME }
 object Settings {
     const val FOV_MIN = 30; const val FOV_MAX = 110
     @Volatile var fov = 60
+    @Volatile var fog = 100  // % of each level's own fog density (0 = no fog)
+    @Volatile var diff = 1   // index into DIFFS
+    val FOG_PRESETS = listOf(0 to "Off", 50 to "Light", 100 to "Default")
+    val fogScale get() = fog / 100.0
+    fun putFog(f: Int) { fog = f.coerceIn(0, 100) }
+    fun fogName(f: Int = fog) = FOG_PRESETS.firstOrNull { it.first == f }?.let { "${it.second} ($f%)" } ?: "Custom ($f%)"
+    fun fogFromFrac(t: Double): Int {
+        val f = (t.coerceIn(0.0, 1.0) * 100).roundToInt()
+        return FOG_PRESETS.firstOrNull { abs(it.first - f) <= 3 }?.first ?: f
+    }
+    fun putDiff(i: Int) { diff = i.coerceIn(0, DIFFS.size - 1) }
     val PRESETS = listOf(30 to "Narrow", 60 to "Normal", 110 to "Quake Pro")
     fun set(f: Int) { fov = f.coerceIn(FOV_MIN, FOV_MAX) }
     fun name(f: Int = fov) = PRESETS.firstOrNull { it.first == f }?.let { "${it.second} ($f)" } ?: "Custom ($f)"
@@ -213,6 +248,16 @@ object Settings {
         return PRESETS.firstOrNull { abs(it.first - f) <= 2 }?.first ?: f
     }
 }
+
+/** Difficulty multipliers (Normal = the original game): entity count, entity speed, how far entities notice you,
+ *  sprint drain / refill, spawn distance, catch distance. */
+class Diff(val name: String, val blurb: String, val count: Double, val speed: Double, val sight: Double, val drain: Double,
+           val regen: Double, val spawn: Double, val catchR: Double)
+val DIFFS = listOf(
+    Diff("Easy", "Fewer, slower entities. Longer sprint.", 0.5, 0.8, 0.8, 0.7, 1.25, 1.4, 0.5),
+    Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6),
+    Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65),
+    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7))
 
 class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
                val pitch: Double, val stamina: Double, val playSec: Double) {
@@ -239,6 +284,8 @@ object Store {
             if (f.exists()) {
                 val p = load(f)
                 p.getProperty("fov")?.toIntOrNull()?.let { Settings.set(it) }
+                p.getProperty("fog")?.toIntOrNull()?.let { Settings.putFog(it) }
+                p.getProperty("diff")?.toIntOrNull()?.let { Settings.putDiff(it) }
                 p.getProperty("found")?.split(",")?.forEach { s -> s.trim().toIntOrNull()?.let { if (it in Progress.found.indices) Progress.found[it] = true } }
             }
         }
@@ -248,7 +295,7 @@ object Store {
         val d = dir ?: return
         runCatching {
             put(File(d, "profile.properties"), java.util.Properties().apply {
-                setProperty("fov", Settings.fov.toString())
+                setProperty("fov", Settings.fov.toString()); setProperty("fog", Settings.fog.toString()); setProperty("diff", Settings.diff.toString())
                 setProperty("found", Progress.found.indices.filter { Progress.found[it] }.joinToString(","))
             })
         }
@@ -352,8 +399,9 @@ class Game {
 
     private fun spawnEntities() {
         entities.clear(); presence = 0.0
-        repeat(LEVELS[level].eCount) {
-            val ang = Math.random() * 6.283; val d = 11 + Math.random() * 8
+        val df = DIFFS[Settings.diff]; val n = LEVELS[level].eCount // entity-free levels stay entity-free
+        repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) {
+            val ang = Math.random() * 6.283; val d = (11 + Math.random() * 8) * df.spawn
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
             entities.add(Entity(q.first, q.second, LEVELS[level].eType))
         }
@@ -377,6 +425,7 @@ class Game {
     fun update(dt: Double, fwd: Double, str: Double, turn: Double, sprint: Boolean) {
         levelT += dt; playSec += dt; flash = max(0.0, flash - dt / 1.2)
         if (dead) { deadT += dt; if (deadT > 3.5) enter(level); return }
+        val dif = DIFFS[Settings.diff]
         a += turn * dt
         pitch = pitch.coerceIn(-1.0, 1.0)
         var f = fwd; var s = str
@@ -384,8 +433,8 @@ class Game {
         if (len > 1) { f /= len; s /= len }
         val moving = len > 0.1
         val run = sprint && moving && !exhausted
-        if (run) { stamina -= 0.10 * dt; if (stamina <= 0) { stamina = 0.0; exhausted = true } }
-        else { stamina = min(1.0, stamina + 0.20 * dt); if (exhausted && stamina > 0.3) exhausted = false }
+        if (run) { stamina -= 0.10 * dif.drain * dt; if (stamina <= 0) { stamina = 0.0; exhausted = true } }
+        else { stamina = min(1.0, stamina + 0.20 * dif.regen * dt); if (exhausted && stamina > 0.3) exhausted = false }
         val speed = if (run) 4.2 else 2.3
         move(level, x, y, cos(a) * f - sin(a) * s, sin(a) * f + cos(a) * s, speed * dt).let { x = it.first; y = it.second }
         if (moving) bob += dt * (if (run) 12.0 else 7.5)
@@ -415,26 +464,26 @@ class Game {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
             pr = max(pr, 1 - d / 12)
             if (e.type == 3) { // Skin-Stealer: walks like a player, patiently closes in
-                if (d < 16 && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22) e.chase = false
+                if (d < 16 * dif.sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22 * dif.sight) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
-                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 2.0 else 0.8) * dt)
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 2.0 else 0.8) * dif.speed * dt)
                 if (r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
                 if (e.chase) dg = max(dg, (1 - d / 6).coerceAtLeast(0.0))
             } else if (e.type == 1) { // Hound: wanders, hunts you on sight, collides with walls
-                if (d < 10 && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 16) e.chase = false
+                if (d < 10 * dif.sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 16 * dif.sight) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 3
-                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 3.4 else 1.0) * dt)
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 3.4 else 1.0) * dif.speed * dt)
                 if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
-                if (e.chase) dg = max(dg, 1 - d / 10)
+                if (e.chase) dg = max(dg, 1 - d / (10 * dif.sight))
             } else { // Smiler: only moves while you are NOT looking at it, drifts through walls
                 var df = (atan2(e.y - y, e.x - x) - a) % (2 * PI)
                 if (df > PI) df -= 2 * PI; if (df < -PI) df += 2 * PI
                 val seen = abs(df) < 0.8 && los(level, x, y, e.x, e.y)
-                if (!seen) { e.x += ex / d * 1.9 * dt; e.y += ey / d * 1.9 * dt } else dg = max(dg, 1 - d / 14)
+                if (!seen) { e.x += ex / d * 1.9 * dif.speed * dt; e.y += ey / d * 1.9 * dif.speed * dt } else dg = max(dg, 1 - d / 14)
             }
-            if (d < 0.6) { dead = true; deadT = 0.0 }
+            if (d < dif.catchR) { dead = true; deadT = 0.0 }
         }
         danger = dg.coerceIn(0.0, 1.0)
         presence += (pr - presence) * min(1.0, dt * 3)
@@ -670,11 +719,45 @@ private val FLICKER = arrayOf(doubleArrayOf(0.12, 0.20, 0.27), doubleArrayOf(0.2
     doubleArrayOf(0.08, 0.16, 0.20))
 
 // ---------- Renderer: textured raycaster, pooled lighting, fog, look up/down, entities ----------
-class Renderer(val W: Int = 480, val H: Int = 270) {
+private val SINT = DoubleArray(4096) { sin(it * 2 * PI / 4096) }
+/** Table sine for cosmetic shimmer (water); accuracy does not matter there, speed does. */
+private fun fsin(x: Double) = SINT[(x * (4096 / (2 * PI))).toInt() and 4095]
+
+/** Floor/ceiling rows, wall columns and the post pass are split over up to `threads` threads (the caller works too). */
+class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime.getRuntime().availableProcessors())) {
     private val zb = DoubleArray(W)
     private val vig = IntArray(W * H)
+    private val camX = DoubleArray(W) { 2.0 * it / W - 1 }
     private var grain = 1234567
+    private var frame = 0
     private var lpx = 0.0; private var lpy = 0.0; private var lant = 0.0; private var pres = 0.0
+    private val nt = max(1, threads)
+    private val pool = if (nt > 1) java.util.concurrent.Executors.newFixedThreadPool(nt - 1) { r -> Thread(r).also { it.isDaemon = true } } else null
+
+    /** Per-thread lamp memo: a lamp's brightness (flicker) is worked out once per frame instead of once per pixel. */
+    private inner class Lamps {
+        val kx = IntArray(256); val ky = IntArray(256); val fr = IntArray(256); val v = DoubleArray(256)
+        var mx = 0; var my = 0; var mv = 1.0; var mf = -1
+        fun at(lv: Int, x: Int, y: Int, t: Double): Double {
+            if (mf == frame && x == mx && y == my) return mv // neighbouring pixels almost always share the lamp
+            val i = ((x * 73856093) xor (y * 19349663)) and 255
+            val r = if (fr[i] == frame && kx[i] == x && ky[i] == y) v[i]
+                    else (flick(lv, x, y, t) * spook(x, y, t)).also { kx[i] = x; ky[i] = y; fr[i] = frame; v[i] = it }
+            mf = frame; mx = x; my = y; mv = r
+            return r
+        }
+    }
+    private val bands = Array(nt) { Lamps() }
+
+    /** body(band, from, to) over [0, n) in `nt` slices; the last slice runs on the calling thread. */
+    private fun par(n: Int, body: (Int, Int, Int) -> Unit) {
+        val p = pool
+        if (p == null) { body(0, 0, n); return }
+        val fs = ArrayList<java.util.concurrent.Future<*>>(nt)
+        for (b in 0 until nt - 1) { val from = n * b / nt; val to = n * (b + 1) / nt; fs.add(p.submit(Runnable { body(b, from, to) })) }
+        body(nt - 1, n * (nt - 1) / nt, n)
+        for (f in fs) f.get()
+    }
 
     init {
         for (y in 0 until H) for (x in 0 until W) {
@@ -689,6 +772,9 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
         val k = (f * 256).toInt().coerceIn(0, 640)
         return pack((((c shr 16) and 255) * k * tn[0]) shr 16, (((c shr 8) and 255) * k * tn[1]) shr 16, ((c and 255) * k * tn[2]) shr 16)
     }
+
+    /** Same as mul() with the per-colour multipliers (k * tint) worked out once per wall column. */
+    private fun mul2(c: Int, kr: Int, kg: Int, kb: Int) = pack((((c shr 16) and 255) * kr) shr 16, (((c shr 8) and 255) * kg) shr 16, ((c and 255) * kb) shr 16)
 
     private fun flick(lv: Int, kx: Int, ky: Int, t: Double): Double {
         val v = h(kx, ky, 9 + lv * 13); val th = FLICKER[lv]
@@ -707,11 +793,12 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
     }
 
     /** Light pooled around each ceiling panel (one every `period` cells). */
-    private fun lightAt(d: LevelDef, wx: Double, wy: Double, t: Double): Double {
+    private fun lightAt(d: LevelDef, lp: Lamps, wx: Double, wy: Double, t: Double): Double {
         val p = d.period
-        val kx = floor((wx - 1.5) / p + 0.5).toInt(); val ky = floor((wy - 1.5) / p + 0.5).toInt()
+        val kx = floor((wx - 1.5) * d.ip + 0.5).toInt(); val ky = floor((wy - 1.5) * d.ip + 0.5).toInt()
         val ddx = wx - (kx * p + 1.5); val ddy = wy - (ky * p + 1.5)
-        return d.ambient + flick(d.id, kx, ky, t) * spook(kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff) + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35)
+        val lamp = d.ambient + lp.at(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff)
+        return if (lant > 0.0) lamp + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35) else lamp
     }
 
     private fun put(px: IntArray, xx: Int, yy: Int, col: Int, a: Int) {
@@ -757,64 +844,78 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
     fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
         val lv = g.level; val d = LEVELS[lv]; val ts = TEX[lv]; val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
-        lpx = x; lpy = y; lant = d.lantern; pres = g.presence
+        frame++; lpx = x; lpy = y; lant = d.lantern; pres = g.presence
         val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
         val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.985) 0.75 else 1.0 // very rare, mild global flicker
         val dx = cos(a); val dy = sin(a)
         val pl = tan(Math.toRadians(Settings.fov / 2.0)); val vs = 0.66 / pl // camera plane length from FOV; vs keeps heights in proportion
         val plX = -dy * pl; val plY = dx * pl
+        val fk = d.fogK * Settings.fogScale // Options > Fog scales every level's own fog
 
-        // floor + ceiling
-        for (yy in 0 until H) {
-            val dr = yy - hz
-            if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
-            val rd = 0.5 * H * vs / abs(dr)
-            val fog = 1.0 / (1 + rd * rd * d.fogK)
-            val isFloor = dr > 0
-            for (xx in 0 until W) {
-                val cx = 2.0 * xx / W - 1
-                val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
-                val tx = ((wx - floor(wx)) * 64).toInt() and 63; val ty = ((wy - floor(wy)) * 64).toInt() and 63
-                val mt = if (lv == 0 && Manila.inside(wx, wy)) MANILA else ts
-                val l = if (mt === MANILA) 1.05 else lightAt(d, wx, wy, t) * gl
-                px[yy * W + xx] = if (isFloor) mul(mt.floor[ty * 64 + tx], l * fog * 0.85 * (if (lv == 6) 0.85 + 0.2 * sin(wx * 9 + t * 1.5) * sin(wy * 9 + t * 1.1) else 1.0), tn)
-                else if (Math.floorMod(floor(wx).toInt(), d.period) == 1 && Math.floorMod(floor(wy).toInt(), d.period) == 1)
-                    mul(mt.panel[ty * 64 + tx], l * max(fog, 0.6), tn)
-                else mul(mt.ceil[ty * 64 + tx], l * fog, tn)
+        // floor + ceiling (rows are split between threads)
+        par(H) { b, r0, r1 ->
+            val lp = bands[b]
+            for (yy in r0 until r1) {
+                val dr = yy - hz
+                if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
+                val rd = 0.5 * H * vs / abs(dr)
+                val fog = 1.0 / (1 + rd * rd * fk)
+                val isFloor = dr > 0
+                val water = lv == 6 && isFloor
+                for (xx in 0 until W) {
+                    val cx = camX[xx]
+                    val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
+                    val tx = ((wx - floor(wx)) * 64).toInt() and 63; val ty = ((wy - floor(wy)) * 64).toInt() and 63
+                    val mt = if (lv == 0 && Manila.inside(wx, wy)) MANILA else ts
+                    val l = if (mt === MANILA) 1.05 else lightAt(d, lp, wx, wy, t) * gl
+                    px[yy * W + xx] = if (isFloor) mul(mt.floor[ty * 64 + tx], l * fog * 0.85 * (if (water) 0.85 + 0.2 * fsin(wx * 9 + t * 1.5) * fsin(wy * 9 + t * 1.1) else 1.0), tn)
+                    else if (Math.floorMod(floor(wx).toInt(), d.period) == 1 && Math.floorMod(floor(wy).toInt(), d.period) == 1)
+                        mul(mt.panel[ty * 64 + tx], l * max(fog, 0.6), tn)
+                    else mul(mt.ceil[ty * 64 + tx], l * fog, tn)
+                }
             }
         }
 
-        // textured walls (DDA)
-        for (xx in 0 until W) {
-            val cx = 2.0 * xx / W - 1
-            val rx = dx + plX * cx; val ry = dy + plY * cx
-            var mapX = floor(x).toInt(); var mapY = floor(y).toInt()
-            val ddx = abs(1 / rx); val ddy = abs(1 / ry)
-            val stepX = if (rx < 0) -1 else 1; val stepY = if (ry < 0) -1 else 1
-            var sdx = if (rx < 0) (x - mapX) * ddx else (mapX + 1 - x) * ddx
-            var sdy = if (ry < 0) (y - mapY) * ddy else (mapY + 1 - y) * ddy
-            var side = 0; var n = 0
-            while (n++ < 64) {
-                if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
-                if (isWall(lv, mapX, mapY)) break
-            }
-            val unst = unstable(lv, mapX, mapY)
-            val wt = if (lv == 0 && Manila.inBox(mapX, mapY)) MANILA else ts
-            val perp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
-            zb[xx] = perp
-            val hx = x + perp * rx; val hy = y + perp * ry
-            var tx = (((if (side == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
-            if ((side == 0 && rx > 0) || (side == 1 && ry < 0)) tx = 63 - tx
-            val br = (if (wt === MANILA) 1.05 else lightAt(d, hx, hy, t) * gl) / (1 + perp * perp * d.fogK) * (if (side == 1) 0.82 else 1.0)
-            val lineH = (H * vs / perp).toInt().coerceAtLeast(1)
-            val start = hz - lineH / 2
-            for (yy in max(0, start)..min(H - 1, start + lineH)) {
-                val ty = ((yy - start).toLong() * 64 / lineH).toInt().coerceIn(0, 63)
-                if (unst) { // cold, wobbling texture = not solid
-                    val tx2 = (tx + (sin(t * 11 + yy * 0.25) * 4).toInt()) and 63
-                    val c0 = mul(wt.wall[ty * 64 + tx2], br * (0.85 + 0.3 * sin(t * 7 + xx * 0.1)), tn)
-                    px[yy * W + xx] = pack((((c0 shr 16) and 255) * 3) / 4, ((c0 shr 8) and 255) + 25, (c0 and 255) + 60)
-                } else px[yy * W + xx] = mul(wt.wall[ty * 64 + tx], br, tn)
+        // textured walls (DDA; columns are split between threads)
+        par(W) { b, c0, c1 ->
+            val lp = bands[b]
+            for (xx in c0 until c1) {
+                val cx = camX[xx]
+                val rx = dx + plX * cx; val ry = dy + plY * cx
+                var mapX = floor(x).toInt(); var mapY = floor(y).toInt()
+                val ddx = abs(1 / rx); val ddy = abs(1 / ry)
+                val stepX = if (rx < 0) -1 else 1; val stepY = if (ry < 0) -1 else 1
+                var sdx = if (rx < 0) (x - mapX) * ddx else (mapX + 1 - x) * ddx
+                var sdy = if (ry < 0) (y - mapY) * ddy else (mapY + 1 - y) * ddy
+                var side = 0; var n = 0
+                while (n++ < 64) {
+                    if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
+                    if (isWall(lv, mapX, mapY)) break
+                }
+                val unst = unstable(lv, mapX, mapY)
+                val wt = if (lv == 0 && Manila.inBox(mapX, mapY)) MANILA else ts
+                val perp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
+                zb[xx] = perp
+                val hx = x + perp * rx; val hy = y + perp * ry
+                var tx = (((if (side == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
+                if ((side == 0 && rx > 0) || (side == 1 && ry < 0)) tx = 63 - tx
+                val br = (if (wt === MANILA) 1.05 else lightAt(d, lp, hx, hy, t) * gl) / (1 + perp * perp * fk) * (if (side == 1) 0.82 else 1.0)
+                val lineH = (H * vs / perp).toInt().coerceAtLeast(1)
+                val start = hz - lineH / 2
+                val y0 = max(0, start); val y1 = min(H - 1, start + lineH)
+                val step = 64.0 / lineH
+                var tpos = (y0 - start) * step // texture row, stepped instead of divided per pixel
+                if (unst) {
+                    for (yy in y0..y1) { // cold, wobbling texture = not solid
+                        val ty = min(63, tpos.toInt()); tpos += step
+                        val tx2 = (tx + (sin(t * 11 + yy * 0.25) * 4).toInt()) and 63
+                        val c0v = mul(wt.wall[ty * 64 + tx2], br * (0.85 + 0.3 * sin(t * 7 + xx * 0.1)), tn)
+                        px[yy * W + xx] = pack((((c0v shr 16) and 255) * 3) / 4, ((c0v shr 8) and 255) + 25, (c0v and 255) + 60)
+                    }
+                } else {
+                    val k = (br * 256).toInt().coerceIn(0, 640); val kr = k * tn[0]; val kg = k * tn[1]; val kb = k * tn[2]
+                    for (yy in y0..y1) { val ty = min(63, tpos.toInt()); tpos += step; px[yy * W + xx] = mul2(wt.wall[ty * 64 + tx], kr, kg, kb) }
+                }
             }
         }
 
@@ -847,24 +948,32 @@ class Renderer(val W: Int = 480, val H: Int = 270) {
             }
         }
 
-        // post: vignette, film grain, danger pulse, death fade
+        // post: vignette, film grain, danger pulse, death fade (rows are split between threads, each with its own grain stream)
         val dgr = g.danger * g.danger * (0.5 + 0.5 * sin(t * (5 + 9 * g.danger)))
         val rk = (dgr * 180).toInt()
         val fadeI = ((if (g.dead) (1 - g.deadT / 1.2).coerceIn(0.0, 1.0) else 1.0) * 256).toInt()
         val wash = ((g.noclip * g.noclip * 150) + g.flash * 255).toInt()
         val amp = 1 + (g.near * 2).toInt()
-        var s = grain
-        for (i in px.indices) {
-            val c = px[i]; val v = (vig[i] * fadeI) shr 8
-            s = s * 1664525 + 1013904223
-            val nz = (((s ushr 28) and 15) - 8) * amp
-            val red = ((256 - vig[i]) * rk) shr 8
-            px[i] = pack((((c shr 16) and 255) * v shr 8) + nz + red + wash, (((c shr 8) and 255) * v shr 8) + nz + wash, ((c and 255) * v shr 8) + nz + wash)
+        val seed = grain
+        par(H) { b, r0, r1 ->
+            var s = seed xor (b * -1640531535)
+            if (rk == 0 && wash == 0) for (i in r0 * W until r1 * W) { // usual case: no red pulse, no flash
+                val c = px[i]; val v = (vig[i] * fadeI) shr 8
+                s = s * 1664525 + 1013904223
+                val nz = (((s ushr 28) and 15) - 8) * amp
+                px[i] = pack((((c shr 16) and 255) * v shr 8) + nz, (((c shr 8) and 255) * v shr 8) + nz, ((c and 255) * v shr 8) + nz)
+            } else for (i in r0 * W until r1 * W) {
+                val c = px[i]; val v = (vig[i] * fadeI) shr 8
+                s = s * 1664525 + 1013904223
+                val nz = (((s ushr 28) and 15) - 8) * amp
+                val red = ((256 - vig[i]) * rk) shr 8
+                px[i] = pack((((c shr 16) and 255) * v shr 8) + nz + red + wash, (((c shr 8) and 255) * v shr 8) + nz + wash, ((c and 255) * v shr 8) + nz + wash)
+            }
         }
-        grain = s
+        grain = seed * 1664525 + 1013904223
         val gk = max(g.noclip, g.near * 0.3) // reality tears while noclipping, and faintly when a not-quite-solid wall is near
         if (gk > 0.02) {
-            var q = s
+            var q = grain
             repeat((gk * 50).toInt() + 1) {
                 q = q * 1664525 + 1013904223; val row = ((q ushr 8) and 0xFFFF) % H
                 q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * gk * 0.35).toInt()

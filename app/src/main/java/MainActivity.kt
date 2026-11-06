@@ -6,6 +6,7 @@ package com.backrooms.game
 import android.app.Activity
 import android.app.AlertDialog
 import android.graphics.*
+import android.os.Build
 import android.os.Bundle
 import android.view.*
 import android.widget.EditText
@@ -55,9 +56,10 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     @Volatile private var scrollY = 0f
     @Volatile private var hits: List<Pair<RectF, () -> Unit>> = emptyList()
     private var cur = ArrayList<Pair<RectF, () -> Unit>>()
-    @Volatile private var sliderR: RectF? = null; @Volatile private var scrollR: RectF? = null
-    private var nextSlider: RectF? = null; private var nextScroll: RectF? = null
-    private var menuDown = false; private var sliding = false; private var dragged = false
+    @Volatile private var fovR: RectF? = null; @Volatile private var fogR: RectF? = null; @Volatile private var scrollR: RectF? = null
+    private var nextFov: RectF? = null; private var nextFog: RectF? = null; private var nextScroll: RectF? = null
+    private var menuDown = false; private var slideId = 0 /* 0 none, 1 FOV, 2 fog */; private var dragged = false
+    private var hw = Build.VERSION.SDK_INT >= 23 // draw on a hardware canvas: the GPU scales the 480x270 frame instead of the CPU
     private var dX = 0f; private var dY = 0f; private var lastY = 0f
 
     private val dp = resources.displayMetrics.density
@@ -126,9 +128,10 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     private fun optHit() = RectF(width / 2f - 28 * dp, 0f, width / 2f + 28 * dp, 46 * dp) // small icon, generous tap area
     private fun runHit() = RectF(width - 84 * dp, height - 84 * dp, width.toFloat(), height.toFloat())
 
-    private fun setFov(x: Float) {
-        val sr = sliderR ?: return
-        Settings.set(Settings.fromFrac(((x - sr.left) / sr.width()).toDouble()))
+    private fun setSlider(id: Int, x: Float) {
+        val sr = (if (id == 1) fovR else fogR) ?: return
+        val t = ((x - sr.left) / sr.width()).toDouble()
+        if (id == 1) Settings.set(Settings.fromFrac(t)) else Settings.putFog(Settings.fogFromFrac(t))
     }
 
     private fun menuTouch(e: MotionEvent): Boolean {
@@ -136,12 +139,12 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 menuDown = true; dX = x; dY = y; lastY = y; dragged = false
-                val sr = sliderR
-                sliding = scr == Scr.OPTIONS && sr != null && RectF(sr.left - 16 * dp, sr.top, sr.right + 16 * dp, sr.bottom).contains(x, y)
-                if (sliding) setFov(x)
+                fun near(sr: RectF?) = sr != null && RectF(sr.left - 16 * dp, sr.top, sr.right + 16 * dp, sr.bottom).contains(x, y)
+                slideId = if (scr != Scr.OPTIONS) 0 else if (near(fovR)) 1 else if (near(fogR)) 2 else 0
+                if (slideId != 0) setSlider(slideId, x)
             }
             MotionEvent.ACTION_MOVE -> {
-                if (sliding) setFov(x)
+                if (slideId != 0) setSlider(slideId, x)
                 else {
                     if (hypot(x - dX, y - dY) > 10 * dp) dragged = true
                     if (dragged && scrollR?.contains(dX, dY) == true) scrollY -= y - lastY
@@ -149,11 +152,11 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
                 lastY = y
             }
             MotionEvent.ACTION_UP -> {
-                if (sliding) { sliding = false; Store.saveProfile() }
+                if (slideId != 0) { slideId = 0; Store.saveProfile() }
                 else if (menuDown && !dragged) hits.lastOrNull { it.first.contains(x, y) }?.second?.invoke()
                 menuDown = false
             }
-            MotionEvent.ACTION_CANCEL -> { sliding = false; menuDown = false }
+            MotionEvent.ACTION_CANCEL -> { slideId = 0; menuDown = false }
         }
         return true
     }
@@ -331,24 +334,42 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { scr = Scr.MAIN }
     }
 
+    /** Labelled slider; returns its touch rectangle. ticks = (position 0..1, label, highlighted). */
+    private fun drawSlider(c: Canvas, title: String, value: String, tl: Float, tr: Float, yTitle: Float, yTrack: Float, frac: Float, ticks: List<Triple<Float, String, Boolean>>): RectF {
+        val a = acc(LEVELS[0])
+        small(c, title, tl, yTitle, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
+        small(c, value, tr, yTitle, 12f, Color.WHITE, Paint.Align.RIGHT, 0.05f, true)
+        pFill.style = Paint.Style.FILL; pFill.color = Color.argb(110, 255, 255, 255); c.drawRoundRect(RectF(tl, yTrack - 2 * dp, tr, yTrack + 2 * dp), 2 * dp, 2 * dp, pFill)
+        val kx = tl + (tr - tl) * frac
+        pFill.color = a; c.drawRoundRect(RectF(tl, yTrack - 2 * dp, kx, yTrack + 2 * dp), 2 * dp, 2 * dp, pFill)
+        for ((f, nm, on) in ticks) {
+            val x = tl + (tr - tl) * f
+            pFill.color = Color.argb(160, 255, 255, 255); c.drawRect(x - 1 * dp, yTrack - 7 * dp, x + 1 * dp, yTrack + 7 * dp, pFill)
+            small(c, nm, x, yTrack + 24 * dp, 9.5f, if (on) a else Color.rgb(190, 185, 160), bold = on)
+        }
+        pFill.color = Color.WHITE; c.drawCircle(kx, yTrack, 10 * dp, pFill)
+        pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 3 * dp; pFill.color = a; c.drawCircle(kx, yTrack, 10 * dp, pFill)
+        return RectF(tl, yTrack - 18 * dp, tr, yTrack + 18 * dp)
+    }
+
     private fun drawOptions(c: Canvas) {
         val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(LEVELS[0])
         dim(c, 220, 200)
-        heading(c, "OPTIONS", a, h * 0.18f)
-        small(c, "FIELD OF VIEW", w / 2, h * 0.36f, 11f, Color.rgb(220, 212, 185), spacing = 0.3f, bold = true)
-        small(c, Settings.name(), w / 2, h * 0.36f + 28 * dp, 18f, Color.WHITE, spacing = 0.05f, bold = true)
-        val tl = w * 0.2f; val tr = w * 0.8f; val ty = h * 0.60f
-        nextSlider = RectF(tl, ty - 18 * dp, tr, ty + 18 * dp)
-        pFill.style = Paint.Style.FILL; pFill.color = Color.argb(110, 255, 255, 255); c.drawRoundRect(RectF(tl, ty - 2 * dp, tr, ty + 2 * dp), 2 * dp, 2 * dp, pFill)
-        val kx = tl + (tr - tl) * Settings.frac().toFloat()
-        pFill.color = a; c.drawRoundRect(RectF(tl, ty - 2 * dp, kx, ty + 2 * dp), 2 * dp, 2 * dp, pFill)
-        for ((f, nm) in Settings.PRESETS) {
-            val x = tl + (tr - tl) * Settings.frac(f).toFloat()
-            pFill.color = Color.argb(160, 255, 255, 255); c.drawRect(x - 1 * dp, ty - 8 * dp, x + 1 * dp, ty + 8 * dp, pFill)
-            small(c, "$nm ($f)", x, ty + 28 * dp, 10f, if (Settings.fov == f) a else Color.rgb(190, 185, 160), bold = Settings.fov == f)
+        heading(c, "OPTIONS", a, h * 0.15f)
+        val tl = w * 0.10f; val tr = w * 0.55f
+        nextFov = drawSlider(c, "FIELD OF VIEW", Settings.name(), tl, tr, h * 0.30f, h * 0.38f, Settings.frac().toFloat(),
+            Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f).toFloat(), "$nm ($f)", Settings.fov == f) })
+        nextFog = drawSlider(c, "FOG", Settings.fogName(), tl, tr, h * 0.56f, h * 0.64f, Settings.fog / 100f,
+            Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100f, nm, Settings.fog == f) })
+        // difficulty
+        val dl = w * 0.64f; val dr = w * 0.92f; val bh = 30 * dp; val gp = 6 * dp; var y = h * 0.34f
+        small(c, "DIFFICULTY", dl, h * 0.30f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
+        val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55))
+        for (i in DIFFS.indices) {
+            btn(c, RectF(dl, y, dr, y + bh), DIFFS[i].name.uppercase(), Settings.diff == i, cols[i]) { Settings.putDiff(i); Store.saveProfile() }
+            y += bh + gp
         }
-        pFill.color = Color.WHITE; c.drawCircle(kx, ty, 11 * dp, pFill)
-        pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 3 * dp; pFill.color = a; c.drawCircle(kx, ty, 11 * dp, pFill)
+        small(c, DIFFS[Settings.diff].blurb, dl, y + 8 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
         btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
     }
 
@@ -449,6 +470,13 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         drawControls(c)
     }
 
+    /** Hardware canvas when available (API 23+), falling back to the normal software canvas if the device refuses. */
+    private fun lock(): Canvas? {
+        if (hw) try { return holder.surface.lockHardwareCanvas() } catch (_: Exception) { hw = false }
+        return holder.lockCanvas()
+    }
+    private fun unlock(c: Canvas) { if (hw) holder.surface.unlockCanvasAndPost(c) else holder.unlockCanvasAndPost(c) }
+
     override fun run() {
         var last = System.nanoTime(); var t = 0.0; var lastSend = 0L
         while (running) {
@@ -469,10 +497,10 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
                 r.render(px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME)
             }
             bmp.setPixels(px, 0, r.W, 0, 0, r.W, r.H)
-            val c = holder.lockCanvas() ?: continue
+            val c = lock() ?: continue
             try {
                 c.drawBitmap(bmp, null, Rect(0, 0, c.width, c.height), bmpPaint)
-                cur = ArrayList(); nextSlider = null; nextScroll = null
+                cur = ArrayList(); nextFov = null; nextFog = null; nextScroll = null
                 when (scr) {
                     Scr.GAME -> drawHud(c)
                     Scr.PAUSE -> drawPause(c)
@@ -481,8 +509,8 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
                     Scr.MAIN -> drawMain(c)
                     else -> {}
                 }
-                hits = cur; sliderR = nextSlider; scrollR = nextScroll
-            } finally { holder.unlockCanvasAndPost(c) }
+                hits = cur; fovR = nextFov; fogR = nextFog; scrollR = nextScroll
+            } finally { unlock(c) }
         }
     }
 }
