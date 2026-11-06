@@ -17,11 +17,13 @@ fun h(x: Int, y: Int, s: Int): Double {
 }
 
 // ---------- Levels ----------
-/** eType: 0 none, 1 Hound (chases on sight), 2 Smiler (moves when unseen), 3 Skin-Stealer (looks like a player, closes in).
+/** eType: 0 none, 1 Hound (chases on sight), 2 Smiler (moves when unseen), 3 Skin-Stealer (looks like a player, closes in),
+ *  4 Faceling (ignores you unless crowded), 5 Lucky Crane (harmless, shy), 6 Living Pizza (harmless, runs away).
  *  lantern: personal light that follows you. isolated: players cannot see each other on this level. */
 class LevelDef(val id: Int, val label: String, val name: String, val blurb: String, val entities: String, val eType: Int, val eCount: Int,
                val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
-               val lantern: Double = 0.0, val isolated: Boolean = false) {
+               val lantern: Double = 0.0, val isolated: Boolean = false,
+               val calm: Double = 1.0, val cast: IntArray = intArrayOf()) { // calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
     val ip = 1.0 / period
 }
 
@@ -37,7 +39,9 @@ val LEVELS = listOf(
     LevelDef(8, "LEVEL 75", "LIMINALITY", "Sand drifts through quiet corridors. You have been here before.", "NONE", 0, 0, 5, 0.42, 0.12, 0.010, intArrayOf(256, 244, 215), 0xE6C98A),
     LevelDef(9, "LEVEL 139", "GRAYSCALE HALLS", "Colourless concrete. The paintings look back.", "NONE", 0, 0, 4, 0.14, 0.38, 0.016, intArrayOf(236, 236, 236), 0xBEBEBE),
     LevelDef(10, "LEVEL 182", "CITY OF DUSK", "A sunset that never sets over empty concrete rooms.", "NONE", 0, 0, 4, 0.22, 0.18, 0.014, intArrayOf(256, 200, 150), 0xFF9A5A),
-    LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true)
+    LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true),
+    LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "FACELINGS · HOUNDS · CRANES", 4, 8, 6, 0.30, 0.10, 0.009, intArrayOf(240, 238, 256), 0xFFC857,
+        calm = 0.45, cast = intArrayOf(4, 5, 1, 4, 6, 5, 1, 4)) // 3 Facelings, 2 Lucky Cranes, 2 Hounds, 1 Living Pizza (scaled by difficulty)
 )
 
 /** The Manila Room: the one and only room of Level 0 where isolation does not apply. */
@@ -130,10 +134,29 @@ private fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     return false
 }
 
+private fun wallCity(x: Int, y: Int): Boolean { // The City: 12x12 blocks, 4-wide streets, a lamp post in every crossing
+    val bx = Math.floorDiv(x, 12); val by = Math.floorDiv(y, 12)
+    val lx = Math.floorMod(x, 12); val ly = Math.floorMod(y, 12)
+    if (lx == 2 && ly == 2) return true                  // lamp post / traffic light
+    if (lx < 4 || ly < 4) return false                   // street
+    val k = h(bx, by, 150)
+    if (k < 0.15) return false                           // plaza / park
+    val sx = 5 + (h(bx, by, 151) * 4).toInt(); val sy = 5 + (h(bx, by, 152) * 4).toInt() // building footprint 5..8
+    val ix = lx - 4 - ((8 - sx) * h(bx, by, 153)).toInt(); val iy = ly - 4 - ((8 - sy) * h(bx, by, 154)).toInt()
+    if (ix < 0 || iy < 0 || ix >= sx || iy >= sy) return false
+    if (k < 0.52) return true                            // about a third of the buildings are solid: they cannot be entered
+    if (ix != 0 && iy != 0 && ix != sx - 1 && iy != sy - 1) return ix == sx / 2 && iy == sy / 2 && k > 0.8 // hollow, some with a pillar
+    val side = (h(bx, by, 155) * 4).toInt(); val dp = 1 + (h(bx, by, 156) * ((if (side < 2) sy else sx) - 3)).toInt()
+    return when (side) { // 2-wide door on one side
+        0 -> !(ix == 0 && iy in dp..dp + 1); 1 -> !(ix == sx - 1 && iy in dp..dp + 1)
+        2 -> !(iy == 0 && ix in dp..dp + 1); else -> !(iy == sy - 1 && ix in dp..dp + 1)
+    }
+}
+
 private fun baseWall(lv: Int, x: Int, y: Int) = when (lv) {
     0 -> wall0(x, y); 1 -> wall1(x, y); 2 -> wall2(x, y); 3 -> wall3(x, y); 4 -> wall4(x, y); 5 -> wall5(x, y); 6 -> wall6(x, y)
     7 -> grid(x, y, 5, 110, 0.8, 2); 8 -> grid(x, y, 8, 120, 0.6, 3); 9 -> grid(x, y, 7, 130, 0.7, 2)
-    10 -> wall5(x + 37, y + 11); else -> grid(x, y, 4, 140, 0.9, 1)
+    10 -> wall5(x + 37, y + 11); 12 -> wallCity(x, y); else -> grid(x, y, 4, 140, 0.9, 1)
 }
 
 // Every so often a long straight hallway (3 wide, 36-60 cells) is cut through the maze. One candidate per 96x96 sector.
@@ -154,7 +177,7 @@ private fun hallway(lv: Int, x: Int, y: Int): Int {
 }
 
 private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
-    if (lv == 0 && Manila.inClear(x, y)) return baseWall(lv, x, y) // the Manila Room stays untouched
+    if (lv == 12 || (lv == 0 && Manila.inClear(x, y))) return baseWall(lv, x, y) // the city has its own long streets; the Manila Room stays untouched
     return when (hallway(lv, x, y)) { 1 -> true; 2 -> false; else -> baseWall(lv, x, y) }
 }
 
@@ -182,9 +205,9 @@ fun isWall(lv: Int, x: Int, y: Int): Boolean = chunk(lv, x shr 5, y shr 5).w[((y
 
 /** Each level has exactly 4 not-quite-solid walls at fixed spots; each leads to a fixed level. */
 val NOCLIP_TARGETS = listOf(
-    intArrayOf(1, 7, 11, 5), intArrayOf(2, 0, 9, 6), intArrayOf(3, 1, 10, 4), intArrayOf(4, 2, 11, 8), intArrayOf(5, 3, 0, 7),
-    intArrayOf(6, 4, 10, 2), intArrayOf(8, 5, 0, 3), intArrayOf(0, 1, 9, 10), intArrayOf(6, 0, 10, 4), intArrayOf(0, 2, 11, 8),
-    intArrayOf(2, 5, 8, 0), intArrayOf(3, 5, 8, 9))
+    intArrayOf(1, 7, 11, 5), intArrayOf(2, 0, 9, 12), intArrayOf(3, 1, 10, 4), intArrayOf(4, 2, 11, 12), intArrayOf(5, 3, 0, 12),
+    intArrayOf(6, 4, 10, 2), intArrayOf(8, 5, 0, 12), intArrayOf(0, 1, 9, 12), intArrayOf(6, 0, 10, 4), intArrayOf(0, 2, 11, 12),
+    intArrayOf(2, 5, 8, 12), intArrayOf(3, 5, 8, 12), intArrayOf(1, 4, 6, 10))
 
 val NOCLIPS: List<List<IntArray>> by lazy {
     LEVELS.indices.map { lv ->
@@ -250,17 +273,18 @@ object Settings {
 }
 
 /** Difficulty multipliers (Normal = the original game): entity count, entity speed, how far entities notice you,
- *  sprint drain / refill, spawn distance, catch distance. */
+ *  sprint drain / refill, spawn distance, catch distance, hunger rate. */
 class Diff(val name: String, val blurb: String, val count: Double, val speed: Double, val sight: Double, val drain: Double,
-           val regen: Double, val spawn: Double, val catchR: Double)
+           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double)
 val DIFFS = listOf(
-    Diff("Easy", "Fewer, slower entities. Longer sprint.", 0.5, 0.8, 0.8, 0.7, 1.25, 1.4, 0.5),
-    Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6),
-    Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65),
-    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7))
+    Diff("Easy", "Fewer, slower entities. Longer sprint.", 0.5, 0.8, 0.8, 0.7, 1.25, 1.4, 0.5, 0.6),
+    Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0),
+    Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65, 1.25),
+    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6))
 
 class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
-               val pitch: Double, val stamina: Double, val playSec: Double) {
+               val pitch: Double, val stamina: Double, val playSec: Double,
+               val hunger: Double = 1.0, val rations: Int = 0, val water: Int = 0, val lobbyT: Double = 0.0) {
     fun info(): String {
         val m = (playSec / 60).toInt()
         val t = if (m < 1) "<1 min" else if (m < 60) "$m min" else "${m / 60}h ${"%02d".format(m % 60)}m"
@@ -308,7 +332,8 @@ object Store {
                 val p = load(f)
                 SaveData(f.name.removeSuffix(".properties"), p.getProperty("stamp").toLong(), p.getProperty("level").toInt(),
                     p.getProperty("x").toDouble(), p.getProperty("y").toDouble(), p.getProperty("a").toDouble(),
-                    p.getProperty("pitch").toDouble(), p.getProperty("stamina").toDouble(), p.getProperty("playSec").toDouble())
+                    p.getProperty("pitch").toDouble(), p.getProperty("stamina").toDouble(), p.getProperty("playSec").toDouble(),
+                    p.getProperty("hunger")?.toDouble() ?: 1.0, p.getProperty("rations")?.toInt() ?: 0, p.getProperty("water")?.toInt() ?: 0, p.getProperty("lobbyT")?.toDouble() ?: 0.0)
             }.getOrNull()
         }.sortedByDescending { it.stamp }
     }
@@ -320,6 +345,7 @@ object Store {
                 setProperty("stamp", s.stamp.toString()); setProperty("level", s.level.toString())
                 setProperty("x", s.x.toString()); setProperty("y", s.y.toString()); setProperty("a", s.a.toString())
                 setProperty("pitch", s.pitch.toString()); setProperty("stamina", s.stamina.toString()); setProperty("playSec", s.playSec.toString())
+                setProperty("hunger", s.hunger.toString()); setProperty("rations", s.rations.toString()); setProperty("water", s.water.toString()); setProperty("lobbyT", s.lobbyT.toString())
             })
         }
     }
@@ -350,7 +376,21 @@ fun los(lv: Int, x0: Double, y0: Double, x1: Double, y1: Double): Boolean {
 // ---------- Entities & player state ----------
 /** type 1 = Hound (Level 1), type 2 = Smiler (Level 2) */
 class Entity(var x: Double, var y: Double, val type: Int) {
-    var dir = Math.random() * 6.283; var chase = false
+    var dir = Math.random() * 6.283; var chase = false; var gift = false
+}
+
+/** Supplies: 1 = ration (food), 2 = almond water (clears hallucinations, a little food). */
+class Supply(val x: Int, val y: Int, val type: Int)
+/** A hallucination: looks like an entity, drifts toward you, harmless, gone when you get close. */
+class Ghost(var x: Double, var y: Double, val type: Int, var life: Double)
+
+/** Supplies are scattered through every level from 1 up. Level 0 keeps them all inside the Manila Room. */
+fun supplyAt(lv: Int, x: Int, y: Int): Int {
+    if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
+    if (isWall(lv, x, y)) return 0
+    val p = if (lv == 0) 0.12 else if (lv == 12) 0.0014 else 0.0010
+    if (h(x, y, 880 + lv) >= p) return 0
+    return if (h(x, y, 881) < 0.4) 2 else 1
 }
 
 class Game {
@@ -367,7 +407,28 @@ class Game {
     var noclip = 0.0; var flash = 0.0; var arrival = "YOU SLIPPED OUT OF REALITY"
     var playSec = 0.0 // total time actually played (paused time does not count), stored in saves
     val entities = CopyOnWriteArrayList<Entity>()
+    // food, supplies, hallucinations
+    @Volatile var hunger = 1.0; @Volatile var rations = 0; @Volatile var water = 0; var starveT = 0.0
+    @Volatile var eatReq = false; @Volatile var drinkReq = false // set by the UI threads, handled in update()
+    var lobbyT = 0.0; @Volatile var halluc = 0.0; val ghosts = CopyOnWriteArrayList<Ghost>(); private var ghostCd = 4.0
+    @Volatile var supplies: List<Supply> = emptyList()
+    private val taken = HashSet<Long>(); private val extra = ArrayList<Supply>()
+    private var scanX = Int.MIN_VALUE; private var scanY = 0
+    private var warnHungry = false; private var warnHallu = false
+    var notice = ""; @Volatile var noticeT = 0.0; var deathMsg = "YOU WERE CAUGHT"
+    fun say(s: String) { notice = s; noticeT = 3.5 }
     init { enter(0) }
+
+    private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
+    private fun resetLevelState() { taken.clear(); extra.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false }
+    /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
+    private fun rescan(cx: Int, cy: Int) {
+        scanX = cx; scanY = cy
+        val out = ArrayList<Supply>()
+        for (dy in -13..13) for (dx in -13..13) { val t = supplyAt(level, cx + dx, cy + dy); if (t != 0 && cellKey(cx + dx, cy + dy) !in taken) out.add(Supply(cx + dx, cy + dy, t)) }
+        for (e in extra) if (cellKey(e.x, e.y) !in taken && abs(e.x - cx) <= 13 && abs(e.y - cy) <= 13) out.add(e)
+        supplies = out
+    }
 
     /** True when other players cannot see you (Level 0 and Level 201), except inside the Manila Room. */
     fun isolated() = LEVELS[level].isolated && !(level == 0 && Manila.inside(x, y))
@@ -385,7 +446,8 @@ class Game {
     }
 
     fun enter(lv: Int, arrived: String = "YOU SLIPPED OUT OF REALITY") {
-        level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived
+        level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived; resetLevelState()
+        if (lv == 12) say("LEVEL 11 EFFECT  ·  hostile entities are less likely to attack you")
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
         Progress.unlock(lv)
         // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
@@ -399,23 +461,25 @@ class Game {
 
     private fun spawnEntities() {
         entities.clear(); presence = 0.0
-        val df = DIFFS[Settings.diff]; val n = LEVELS[level].eCount // entity-free levels stay entity-free
-        repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) {
+        val df = DIFFS[Settings.diff]; val ld = LEVELS[level]; val cast = ld.cast
+        val n = if (cast.isEmpty()) ld.eCount else cast.size // entity-free levels stay entity-free
+        repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) { i ->
             val ang = Math.random() * 6.283; val d = (11 + Math.random() * 8) * df.spawn
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
-            entities.add(Entity(q.first, q.second, LEVELS[level].eType))
+            entities.add(Entity(q.first, q.second, if (cast.isEmpty()) ld.eType else cast[i % cast.size]))
         }
     }
 
-    fun newGame(lv: Int = 0) { playSec = 0.0; enter(lv) }
+    fun newGame(lv: Int = 0) { playSec = 0.0; hunger = 1.0; rations = 0; water = 0; starveT = 0.0; enter(lv) }
 
-    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec)
+    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT)
 
     /** Resume a save: same level and spot; entities start fresh, 11+ cells away. */
     fun restore(s: SaveData) {
         level = s.level.coerceIn(0, LEVELS.size - 1); levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
         arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
         a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
+        resetLevelState(); hunger = s.hunger.coerceIn(0.0, 1.0); rations = s.rations.coerceIn(0, 9); water = s.water.coerceIn(0, 9); lobbyT = s.lobbyT.coerceAtLeast(0.0); starveT = 0.0
         Progress.unlock(level)
         val p = findFree(s.x, s.y); x = p.first; y = p.second
         spawnEntities()
@@ -423,9 +487,11 @@ class Game {
 
     /** fwd/str in -1..1 (analog), turn in rad/s */
     fun update(dt: Double, fwd: Double, str: Double, turn: Double, sprint: Boolean) {
-        levelT += dt; playSec += dt; flash = max(0.0, flash - dt / 1.2)
-        if (dead) { deadT += dt; if (deadT > 3.5) enter(level); return }
+        levelT += dt; playSec += dt; flash = max(0.0, flash - dt / 1.2); noticeT = max(0.0, noticeT - dt)
+        if (dead) { deadT += dt; if (deadT > 3.5) { hunger = max(hunger, 0.5); starveT = 0.0; enter(level) }; return }
         val dif = DIFFS[Settings.diff]
+        if (eatReq) { eatReq = false; if (rations > 0) { rations--; hunger = min(1.0, hunger + 0.35); say("YOU ATE A RATION") } }
+        if (drinkReq) { drinkReq = false; if (water > 0) { water--; hunger = min(1.0, hunger + 0.08); lobbyT = 0.0; halluc = 0.0; ghosts.clear(); say("ALMOND WATER  ·  your head clears") } }
         a += turn * dt
         pitch = pitch.coerceIn(-1.0, 1.0)
         var f = fwd; var s = str
@@ -433,9 +499,14 @@ class Game {
         if (len > 1) { f /= len; s /= len }
         val moving = len > 0.1
         val run = sprint && moving && !exhausted
+        // food: full to empty in about 10 minutes of walking; hungry = slower recovery, starving = slower and, eventually, fatal
+        hunger = max(0.0, hunger - (0.0016 + (if (run) 0.0020 else 0.0)) * dif.hunger * dt)
+        starveT = if (hunger <= 0.0) starveT + dt else 0.0
+        if (starveT > 75) { dead = true; deadT = 0.0; deathMsg = "YOU STARVED"; return }
+        if (hunger < 0.2 && !warnHungry) { warnHungry = true; say("YOU ARE HUNGRY  ·  find food") } else if (hunger > 0.4) warnHungry = false
         if (run) { stamina -= 0.10 * dif.drain * dt; if (stamina <= 0) { stamina = 0.0; exhausted = true } }
-        else { stamina = min(1.0, stamina + 0.20 * dif.regen * dt); if (exhausted && stamina > 0.3) exhausted = false }
-        val speed = if (run) 4.2 else 2.3
+        else { stamina = min(1.0, stamina + 0.20 * dif.regen * (if (hunger < 0.2) 0.6 else 1.0) * dt); if (exhausted && stamina > 0.3) exhausted = false }
+        val speed = (if (run) 4.2 else 2.3) * (if (hunger <= 0.0) 0.85 else 1.0)
         move(level, x, y, cos(a) * f - sin(a) * s, sin(a) * f + cos(a) * s, speed * dt).let { x = it.first; y = it.second }
         if (moving) bob += dt * (if (run) 12.0 else 7.5)
         bobAmp += ((if (!moving) 0.0 else if (run) 1.0 else 0.6) - bobAmp) * min(1.0, dt * 8)
@@ -459,34 +530,87 @@ class Game {
         manilaNear = if (level == 0 && !inM) (1 - hypot(Manila.CX + 4.5 - x, Manila.CY + 4.5 - y) / 45).coerceIn(0.0, 1.0) else 0.0
         manilaT = if (inM) manilaT + dt else 0.0
 
+        // The Lobby gets to you: stay in its open halls too long and you start seeing things. Almond water or the Manila Room clears your head.
+        if (level == 0) lobbyT = if (inM) max(0.0, lobbyT - dt * 2) else lobbyT + dt
+        halluc += (((lobbyT - 240) / 300).coerceIn(0.0, 1.0) - halluc) * min(1.0, dt * 0.5)
+        if (halluc > 0.08 && !warnHallu) { warnHallu = true; say("YOUR EYES PLAY TRICKS  ·  almond water or the Manila Room helps") } else if (halluc < 0.02) warnHallu = false
+        updateGhosts(dt)
+
         var dg = 0.0; var pr = 0.0
+        val calm = LEVELS[level].calm
         for (e in entities) {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
-            pr = max(pr, 1 - d / 12)
+            if (e.type != 5 && e.type != 6) pr = max(pr, 1 - d / 12)
+            val sight = dif.sight * (if (calm < 1.0 && !(run && d < 12)) calm else 1.0) // Level 11 Effect: hostiles mostly ignore you, unless you run past them
             if (e.type == 3) { // Skin-Stealer: walks like a player, patiently closes in
-                if (d < 16 * dif.sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22 * dif.sight) e.chase = false
+                if (d < 16 * sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22 * sight) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 2.0 else 0.8) * dif.speed * dt)
                 if (r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
                 if (e.chase) dg = max(dg, (1 - d / 6).coerceAtLeast(0.0))
             } else if (e.type == 1) { // Hound: wanders, hunts you on sight, collides with walls
-                if (d < 10 * dif.sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 16 * dif.sight) e.chase = false
+                if (d < 10 * sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 16 * sight) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 3
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 3.4 else 1.0) * dif.speed * dt)
                 if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
-                if (e.chase) dg = max(dg, 1 - d / (10 * dif.sight))
+                if (e.chase) dg = max(dg, 1 - d / (10 * sight))
+            } else if (e.type == 4) { // Faceling: drifts around, ignores you until you crowd it
+                if (d < 3.5 && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 14) e.chase = false
+                if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 2.6 else 0.7) * dif.speed * dt)
+                if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
+                e.x = r.first; e.y = r.second
+                if (e.chase) dg = max(dg, (1 - d / 8).coerceAtLeast(0.0))
+            } else if (e.type == 5) { // Lucky Crane: harmless and shy; leaves a ration behind if you get close
+                if (d < 5) e.dir = atan2(-ey, -ex) + (Math.random() - 0.5) * 0.6 else e.dir += (Math.random() - 0.5) * dt * 2.5
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (d < 5) 2.4 else 0.9) * dt)
+                if (r.first == e.x && r.second == e.y) e.dir += 1.6
+                e.x = r.first; e.y = r.second
+                if (d < 2.2 && !e.gift) { e.gift = true; extra.add(Supply(floor(e.x).toInt(), floor(e.y).toInt(), 1)); scanX = Int.MIN_VALUE; say("A LUCKY CRANE LEFT A RATION") }
+            } else if (e.type == 6) { // Living Pizza: runs away; catch it (sprint!) and it is food
+                if (d < 6) e.dir = atan2(-ey, -ex) + (Math.random() - 0.5) * 0.8 else e.dir += (Math.random() - 0.5) * dt * 2.5
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (d < 6) 2.8 else 0.8) * dt)
+                if (r.first == e.x && r.second == e.y) e.dir += 1.6
+                e.x = r.first; e.y = r.second
+                if (d < 0.8) { entities.remove(e); hunger = min(1.0, hunger + 0.5); say("YOU CAUGHT A LIVING PIZZA  ·  +FOOD"); continue }
             } else { // Smiler: only moves while you are NOT looking at it, drifts through walls
                 var df = (atan2(e.y - y, e.x - x) - a) % (2 * PI)
                 if (df > PI) df -= 2 * PI; if (df < -PI) df += 2 * PI
                 val seen = abs(df) < 0.8 && los(level, x, y, e.x, e.y)
                 if (!seen) { e.x += ex / d * 1.9 * dif.speed * dt; e.y += ey / d * 1.9 * dif.speed * dt } else dg = max(dg, 1 - d / 14)
             }
-            if (d < dif.catchR) { dead = true; deadT = 0.0 }
+            if (d < dif.catchR && (e.type <= 3 || (e.type == 4 && e.chase))) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
         }
         danger = dg.coerceIn(0.0, 1.0)
         presence += (pr - presence) * min(1.0, dt * 3)
+
+        // pick up supplies by walking over them (bag holds 9 of each)
+        val cx0 = floor(x).toInt(); val cy0 = floor(y).toInt()
+        if (cx0 != scanX || cy0 != scanY) rescan(cx0, cy0)
+        for (sp in supplies) if (hypot(sp.x + 0.5 - x, sp.y + 0.5 - y) < 0.75 && (if (sp.type == 1) rations else water) < 9) {
+            taken.add(cellKey(sp.x, sp.y)); if (sp.type == 1) rations++ else water++
+            say(if (sp.type == 1) "+1 RATION" else "+1 ALMOND WATER"); scanX = Int.MIN_VALUE
+        }
+    }
+
+    private fun updateGhosts(dt: Double) {
+        for (gh in ghosts) {
+            val d = hypot(x - gh.x, y - gh.y).coerceAtLeast(0.01)
+            gh.life -= dt
+            if (gh.life <= 0 || d < 2.5) { ghosts.remove(gh); if (d < 2.5) flash = max(flash, 0.3); continue } // it was never there
+            gh.x += (x - gh.x) / d * 0.9 * dt; gh.y += (y - gh.y) / d * 0.9 * dt
+        }
+        if (halluc > 0.1 && ghosts.size < 1 + (halluc * 3).toInt()) {
+            ghostCd -= dt
+            if (ghostCd <= 0) {
+                ghostCd = 9 - 7 * halluc + Math.random() * 3
+                val ang = a + (Math.random() - 0.5) * 1.4; val dd = 6 + Math.random() * 8
+                val q = findFree(x + cos(ang) * dd, y + sin(ang) * dd)
+                ghosts.add(Ghost(q.first, q.second, intArrayOf(0, 2, 3)[(Math.random() * 3).toInt()], 4 + Math.random() * 4))
+            }
+        }
     }
 }
 
@@ -545,7 +669,7 @@ class Net(private val host: String, private val port: Int = PORT) {
 // ---------- Procedural textures (64x64), one set per level ----------
 fun pack(r: Int, g: Int, b: Int) = (0xFF shl 24) or (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)
 
-/** Colours and patterns for the data-driven levels (7..11). wp: wall pattern, fp: floor pattern. */
+/** Colours and patterns for the data-driven levels (7..12). wp: wall pattern, fp: floor pattern. */
 class TexSpec(val w: IntArray, val f: IntArray, val c: IntArray, val p: IntArray, val wp: Int, val fp: Int)
 val SPECS = listOf(
     TexSpec(intArrayOf(190, 170, 90), intArrayOf(100, 84, 44), intArrayOf(180, 170, 140), intArrayOf(255, 255, 200), 0, 0),   // 7  Lights Out
@@ -553,6 +677,7 @@ val SPECS = listOf(
     TexSpec(intArrayOf(150, 150, 150), intArrayOf(95, 95, 95), intArrayOf(135, 135, 135), intArrayOf(235, 235, 235), 8, 3),    // 9  Grayscale Halls
     TexSpec(intArrayOf(130, 126, 120), intArrayOf(88, 84, 80), intArrayOf(100, 96, 92), intArrayOf(255, 160, 90), 3, 0),      // 10 City of Dusk
     TexSpec(intArrayOf(200, 200, 206), intArrayOf(168, 168, 176), intArrayOf(210, 210, 216), intArrayOf(255, 255, 255), 5, 3), // 11 Threshold
+    TexSpec(intArrayOf(104, 100, 114), intArrayOf(58, 58, 64), intArrayOf(16, 20, 40), intArrayOf(255, 236, 170), 9, 4),         // 12 The City (Level 11)
 )
 
 class TexSet(lv: Int) {
@@ -689,6 +814,13 @@ class TexSet(lv: Int) {
                             val tx = x % 32; val ty = y % 32
                             if (ty in 7..25 && abs(abs(tx - 16) - (ty - 6) / 2) < 1) f *= 0.55
                         }
+                        9 -> { // city facade: window grid (about half lit) and a lit shopfront at street level
+                            val wx = x % 16; val wy = y % 16
+                            if (y >= 48) { if (x % 32 in 3..28 && y in 50..61) { r = 255.0; g = 196.0; b = 110.0; f = 1.0 + 0.2 * h(x, y, 208) } else { r = 52.0; g = 50.0; b = 56.0 } }
+                            else if (wx in 3..12 && wy in 3..12) {
+                                if (h(x / 16, y / 16, 207) < 0.5) { r = 255.0; g = 214.0; b = 130.0; f = 1.0 + 0.2 * h(x, y, 209) } else { r = 34.0; g = 44.0; b = 64.0 }
+                            } else if (wy == 0) f *= 0.8
+                        }
                         8 -> { // framed pictures
                             if (x in 10..53 && y in 8..42) {
                                 if (x in 13..50 && y in 11..39) { val v = 70 + 110 * h(x / 3, y / 3, 206); r = v; g = v; b = v; f = 1.0 } else { r = 40.0; g = 40.0; b = 40.0 }
@@ -702,8 +834,12 @@ class TexSet(lv: Int) {
                         3 -> if (x % 16 == 0 || y % 16 == 0) ff *= 0.7                         // tile grout
                     }
                     floor[i] = c(sp.f[0].toDouble(), sp.f[1].toDouble(), sp.f[2].toDouble(), ff)
+                    if (sp.fp == 4) { // asphalt: yellow dashes down the middle, pale kerb at the edges
+                        if (x in 30..33 && y % 32 < 18) floor[i] = pack(206, 176, 58) else if (x < 2 || x > 61) floor[i] = pack(122, 122, 128)
+                    }
                     var tf = 0.9 + 0.15 * h(x, y, 221 + lv); if (x < 2 || y < 2) tf *= 0.75
                     ceil[i] = c(sp.c[0].toDouble(), sp.c[1].toDouble(), sp.c[2].toDouble(), tf)
+                    if (sp.wp == 9 && h(x, y, 230) < 0.015) ceil[i] = pack(240, 240, 255) // night sky: stars
                     panel[i] = if (x < 5 || x > 58 || y < 5 || y > 58) pack(sp.p[0] * 3 / 4, sp.p[1] * 3 / 4, sp.p[2] * 3 / 4) else pack(sp.p[0], sp.p[1], sp.p[2])
                 }
             }
@@ -716,7 +852,7 @@ val MANILA = TexSet(99)
 private val FLICKER = arrayOf(doubleArrayOf(0.12, 0.20, 0.27), doubleArrayOf(0.20, 0.28, 0.40), doubleArrayOf(0.15, 0.25, 0.32),
     doubleArrayOf(0.25, 0.35, 0.45), doubleArrayOf(0.15, 0.22, 0.30), doubleArrayOf(0.18, 0.30, 0.38), doubleArrayOf(0.02, 0.05, 0.05),
     doubleArrayOf(0.02, 0.04, 0.95), doubleArrayOf(0.0, 0.02, 0.03), doubleArrayOf(0.10, 0.20, 0.28), doubleArrayOf(0.0, 0.05, 0.08),
-    doubleArrayOf(0.08, 0.16, 0.20))
+    doubleArrayOf(0.08, 0.16, 0.20), doubleArrayOf(0.02, 0.05, 0.06))
 
 // ---------- Renderer: textured raycaster, pooled lighting, fog, look up/down, entities ----------
 private val SINT = DoubleArray(4096) { sin(it * 2 * PI / 4096) }
@@ -748,6 +884,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         }
     }
     private val bands = Array(nt) { Lamps() }
+    private val rowTmp = IntArray(W)
 
     /** body(band, from, to) over [0, n) in `nt` slices; the last slice runs on the calling thread. */
     private fun par(n: Int, body: (Int, Int, Int) -> Unit) {
@@ -767,6 +904,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
 
     private fun sq(a: Double) = a * a
+    private fun sc(r: Int, g: Int, b: Int, dim: Double) = pack((r * dim).toInt(), (g * dim).toInt(), (b * dim).toInt())
 
     private fun mul(c: Int, f: Double, tn: IntArray): Int {
         val k = (f * 256).toInt().coerceIn(0, 640)
@@ -818,14 +956,55 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private fun sprite(type: Int, u: Double, v: Double, dim: Double): Int {
         val dark = pack((16 * dim).toInt(), (14 * dim).toInt(), (10 * dim).toInt())
         return when (type) {
-            0, 3 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow
+            0, 3, 4 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow; type 4 (Faceling) has a pale head with misplaced features
                 val inside = when {
                     v < 0.17 -> sq(u / 0.42) + sq((v - 0.09) / 0.085) < 1
                     v < 0.22 -> abs(u) < 0.18
                     v < 0.62 -> abs(u) < 0.8 - (v - 0.22) * 0.5
                     else -> abs(abs(u) - 0.35) < 0.22
                 }
-                if (!inside) 0 else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225) else dark
+                if (!inside) 0
+                else if (type == 4) {
+                    if (v >= 0.17) sc(40, 42, 56, dim)
+                    else if (sq((u + 0.12) / 0.06) + sq((v - 0.07) / 0.016) < 1 || sq((u - 0.2) / 0.05) + sq((v - 0.105) / 0.02) < 1 || (abs(u + 0.02) < 0.12 && abs(v - 0.145) < 0.006)) dark
+                    else sc(208, 192, 178, dim)
+                }
+                else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225) else dark
+            }
+            5 -> { // Lucky Crane: white bird, red crown, long neck
+                val head = sq((u + 0.45) / 0.12) + sq((v - 0.17) / 0.09) < 1
+                val neck = abs(u + 0.42) < 0.07 && v in 0.2..0.55
+                val body = sq((u - 0.05) / 0.5) + sq((v - 0.58) / 0.2) < 1
+                when {
+                    head && v < 0.12 -> sc(210, 40, 40, dim)
+                    head || neck || body -> sc(236, 236, 226, dim)
+                    v in 0.14..0.2 && u in -0.8..-0.56 -> sc(200, 120, 40, dim)
+                    u in 0.45..0.8 && abs(v - (0.52 - (u - 0.45) * 0.4)) < 0.05 -> sc(40, 40, 44, dim)
+                    v > 0.76 && (abs(u) < 0.03 || abs(u - 0.2) < 0.03) -> sc(200, 120, 40, dim)
+                    else -> 0
+                }
+            }
+            6 -> { // Living Pizza: round, crust, cheese, pepperoni and a worried face
+                val r2 = sq(u * 0.5) + sq(v - 0.55)
+                if (r2 > 0.2) 0
+                else if (sq((abs(u) - 0.35) / 0.06) + sq((v - 0.46) / 0.03) < 1) sc(20, 16, 14, dim)
+                else if (sq((abs(u) - 0.35) / 0.17) + sq((v - 0.45) / 0.075) < 1) sc(245, 245, 240, dim)
+                else if (abs(u) < 0.3 && abs(v - (0.68 + 0.04 * sq(u / 0.3))) < 0.015) sc(120, 30, 24, dim)
+                else if (sq((u + 0.55) / 0.17) + sq((v - 0.65) / 0.08) < 1 || sq((u - 0.5) / 0.17) + sq((v - 0.7) / 0.08) < 1 || sq(u / 0.17) + sq((v - 0.3) / 0.08) < 1) sc(176, 52, 42, dim)
+                else if (r2 > 0.15) sc(206, 140, 60, dim)
+                else sc(250, 205, 92, dim)
+            }
+            7 -> { // ration: tin can
+                if (abs(u) > 0.7 || v < 0.15) 0
+                else if (v < 0.3 || v > 0.9) sc(196, 200, 204, dim)
+                else if (v in 0.45..0.75) sc(236, 226, 190, dim) else sc(170, 60, 46, dim)
+            }
+            8 -> { // almond water: bottle with a cream label
+                val neck = abs(u) < 0.28 && v in 0.08..0.3; val body = abs(u) < 0.7 && v in 0.3..1.0
+                if (!neck && !body) 0
+                else if (v < 0.14) sc(210, 170, 60, dim)
+                else if (body && v in 0.52..0.82) (if (abs(u) < 0.2 && v in 0.6..0.74) sc(150, 98, 52, dim) else sc(240, 226, 190, dim))
+                else sc(170, 212, 238, dim)
             }
             1 -> { // Hound: low quadruped, red eye
                 val body = sq((u - 0.1) / 0.7) + sq((v - 0.55) / 0.32) < 1
@@ -927,17 +1106,21 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             items.add(doubleArrayOf(o[0], o[1], 0.0))
         }
         for (e in g.entities) items.add(doubleArrayOf(e.x, e.y, e.type.toDouble()))
-        items.sortByDescending { hypot(it[0] - x, it[1] - y) }
+        for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) 7.0 else 8.0))
+        for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
+        items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
         for (o in items) {
             val rx = o[0] - x; val ry = o[1] - y; val type = o[2].toInt()
             val inv = 1.0 / (plX * dy - dx * plY)
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val sh = (full * (if (type == 1) 0.6 else 0.9)).toInt().coerceAtLeast(2)
-            val sw = (sh * (if (type == 1) 1.7 else if (type == 2) 0.5 else 0.42)).toInt().coerceAtLeast(2)
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.55; 6 -> 0.45; 7 -> 0.2; 8 -> 0.26; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 0.9; 6 -> 1.0; 7 -> 0.9; 8 -> 0.55; else -> 0.42 }
+            val sh = (full * hk).toInt().coerceAtLeast(2)
+            val sw = (sh * wk).toInt().coerceAtLeast(2)
             val bottom = hz + (full / 2).toInt(); val top = bottom - sh
-            val dim = 0.55 + 0.45 / (1 + ty * 0.3)
+            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 7) max(0.85, it) else if (o.size > 3) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
             for (col in max(0, sx - sw / 2)..min(W - 1, sx + sw / 2)) {
                 if (ty >= zb[col]) continue
                 val u = (col - sx) / (sw / 2.0)
@@ -949,7 +1132,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         }
 
         // post: vignette, film grain, danger pulse, death fade (rows are split between threads, each with its own grain stream)
-        val dgr = g.danger * g.danger * (0.5 + 0.5 * sin(t * (5 + 9 * g.danger)))
+        val dgr = max(g.danger * g.danger * (0.5 + 0.5 * sin(t * (5 + 9 * g.danger))), g.halluc * 0.3 * (0.5 + 0.5 * sin(t * 1.9))) // danger pulse; hallucinations breathe red
         val rk = (dgr * 180).toInt()
         val fadeI = ((if (g.dead) (1 - g.deadT / 1.2).coerceIn(0.0, 1.0) else 1.0) * 256).toInt()
         val wash = ((g.noclip * g.noclip * 150) + g.flash * 255).toInt()
@@ -981,6 +1164,17 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                     val base = row * W; val tmp = px.copyOfRange(base, base + W)
                     for (i in 0 until W) px[base + (((i + sh) % W) + W) % W] = tmp[i]
                 }
+            }
+        }
+
+        if (g.halluc > 0.04) { // hallucination: the picture sways from side to side
+            val amp = g.halluc * 5.0
+            for (row in 0 until H) {
+                val sh = (sin(row * 0.11 + t * 2.3) * amp + sin(row * 0.047 - t * 1.1) * amp * 0.6).toInt()
+                if (sh == 0) continue
+                val base = row * W; System.arraycopy(px, base, rowTmp, 0, W)
+                if (sh > 0) { System.arraycopy(rowTmp, 0, px, base + sh, W - sh); System.arraycopy(rowTmp, W - sh, px, base, sh) }
+                else { val k = -sh; System.arraycopy(rowTmp, k, px, base, W - k); System.arraycopy(rowTmp, 0, px, base + W - k, k) }
             }
         }
 

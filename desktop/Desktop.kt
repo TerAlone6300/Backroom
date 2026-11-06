@@ -310,6 +310,17 @@ fun main(args: Array<String>) {
             txt(g2, status, 30, 14 + 2 * sz + 10, Font("SansSerif", Font.PLAIN, sz - 1), Color(225, 215, 180), false)
             txt(g2, "${fps.toInt()} FPS", 30, 14 + 3 * sz + 14, Font("SansSerif", Font.PLAIN, sz - 3), Color(160, 155, 130), false)
 
+            // food bar (blinks red when low) and supplies
+            val fy = 14 + sz * 4 + 26; val low = g.hunger < 0.2
+            g2.color = Color(0, 0, 0, 120); g2.fillRoundRect(14, fy, sz * 19, sz * 2 + 12, 10, 10)
+            txt(g2, "FOOD", 26, fy + sz + 1, spaced(Font("SansSerif", Font.BOLD, max(9, sz - 3)), 0.2f), Color(225, 215, 180), false)
+            val bx0 = 26 + sz * 4; val bw0 = sz * 19 - (bx0 - 14) - 12
+            g2.color = Color(255, 255, 255, 110); g2.fillRect(bx0, fy + sz / 2 + 1, bw0, 7)
+            g2.color = if (low && (System.currentTimeMillis() / 300) % 2 == 0L) Color(235, 70, 55) else if (low) Color(210, 90, 60) else Color(240, 170, 70)
+            g2.fillRect(bx0, fy + sz / 2 + 1, (bw0 * g.hunger).toInt(), 7)
+            txt(g2, "E  RATION ×${g.rations}     Q  ALMOND WATER ×${g.water}", 26, fy + sz * 2 + 4, Font("SansSerif", Font.PLAIN, max(9, sz - 3)), Color(240, 200, 120), false)
+            if (g.noticeT > 0) txt(g2, g.notice, w / 2, (hh * 0.74).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 38), 0.08f), Color(255, 236, 180, (min(1.0, g.noticeT) * 255).toInt()))
+
             g2.color = Color(255, 255, 255, 120); g2.fillOval(w / 2 - 2, hh / 2 - 2, 4, 4) // crosshair dot
             txt(g2, "ESC  ≡  OPTIONS", w / 2, 14 + sz, spaced(Font("SansSerif", Font.BOLD, max(9, sz - 4)), 0.2f), Color(255, 255, 255, 110)) // small pause hint, top-centre
 
@@ -338,7 +349,7 @@ fun main(args: Array<String>) {
             if (g.dead) {
                 g2.color = Color(120, 0, 0, min(170, (g.deadT * 130).toInt())); g2.fillRect(0, 0, w, hh)
                 if (g.deadT > 0.6) {
-                    txt(g2, "YOU WERE CAUGHT", w / 2, (hh * 0.48).toInt(), Font("Serif", Font.BOLD, hh / 10), Color(235, 70, 55))
+                    txt(g2, g.deathMsg, w / 2, (hh * 0.48).toInt(), Font("Serif", Font.BOLD, hh / 10), Color(235, 70, 55))
                     txt(g2, "respawning…", w / 2, (hh * 0.57).toInt(), Font("SansSerif", Font.PLAIN, hh / 32), Color(230, 200, 190))
                 }
             }
@@ -357,6 +368,8 @@ fun main(args: Array<String>) {
                 KeyEvent.VK_ENTER -> when (scr) { Scr.MAIN -> openSaves(); Scr.SAVES -> startGame(); Scr.MULTI -> joinServer(); else -> {} }
                 KeyEvent.VK_BACK_SPACE -> if (scr == Scr.MULTI && ip.isNotEmpty()) ip.setLength(ip.length - 1)
                 KeyEvent.VK_M -> if (scr == Scr.GAME) g.showMap = !g.showMap
+                KeyEvent.VK_E -> if (scr == Scr.GAME) g.eatReq = true
+                KeyEvent.VK_Q -> if (scr == Scr.GAME) g.drinkReq = true
                 KeyEvent.VK_LEFT -> if (scr == Scr.OPTIONS) { Settings.set(Settings.fov - 1); Store.saveProfile() }
                 KeyEvent.VK_RIGHT -> if (scr == Scr.OPTIONS) { Settings.set(Settings.fov + 1); Store.saveProfile() }
             }
