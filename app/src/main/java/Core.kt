@@ -24,7 +24,7 @@ class LevelDef(val id: Int, val label: String, val name: String, val blurb: Stri
                val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
                val lantern: Double = 0.0, val isolated: Boolean = false,
                val calm: Double = 1.0, val cast: IntArray = intArrayOf(),
-               val safe: Boolean = false) { // safe: rated Safe & Secure (Explore noclips favour these); calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
+               val safe: Boolean = false, val lamp0: Double = 1.5) { // lamp0: where the lamp lattice starts; safe: rated Safe & Secure (Explore noclips favour these); calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
     val ip = 1.0 / period
 }
 
@@ -41,8 +41,8 @@ val LEVELS = listOf(
     LevelDef(9, "LEVEL 139", "GRAYSCALE HALLS", "Colourless concrete. The paintings look back.", "NONE", 0, 0, 4, 0.14, 0.38, 0.016, intArrayOf(236, 236, 236), 0xBEBEBE, safe = true),
     LevelDef(10, "LEVEL 182", "CITY OF DUSK", "A sunset that never sets over empty concrete rooms.", "NONE", 0, 0, 4, 0.22, 0.18, 0.014, intArrayOf(256, 200, 150), 0xFF9A5A, safe = true),
     LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true, safe = true),
-    LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "FACELINGS · HOUNDS · CRANES", 4, 8, 6, 0.30, 0.10, 0.009, intArrayOf(240, 238, 256), 0xFFC857,
-        calm = 0.45, cast = intArrayOf(4, 5, 1, 4, 6, 5, 1, 4), safe = true) // 3 Facelings, 2 Lucky Cranes, 2 Hounds, 1 Living Pizza (scaled by difficulty)
+    LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "FACELINGS · HOUNDS · CRANES", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
+        calm = 0.45, cast = intArrayOf(4, 5, 1, 4, 6, 5, 1, 4), safe = true, lamp0 = 0.5) // 3 Facelings, 2 Lucky Cranes, 2 Hounds, 1 Living Pizza (scaled by difficulty)
 )
 
 /** The Manila Room: the one and only room of Level 0 where isolation does not apply. */
@@ -135,29 +135,10 @@ private fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     return false
 }
 
-private fun wallCity(x: Int, y: Int): Boolean { // The City: 12x12 blocks, 4-wide streets, a lamp post in every crossing
-    val bx = Math.floorDiv(x, 12); val by = Math.floorDiv(y, 12)
-    val lx = Math.floorMod(x, 12); val ly = Math.floorMod(y, 12)
-    if (lx == 2 && ly == 2) return true                  // lamp post / traffic light
-    if (lx < 4 || ly < 4) return false                   // street
-    val k = h(bx, by, 150)
-    if (k < 0.15) return false                           // plaza / park
-    val sx = 5 + (h(bx, by, 151) * 4).toInt(); val sy = 5 + (h(bx, by, 152) * 4).toInt() // building footprint 5..8
-    val ix = lx - 4 - ((8 - sx) * h(bx, by, 153)).toInt(); val iy = ly - 4 - ((8 - sy) * h(bx, by, 154)).toInt()
-    if (ix < 0 || iy < 0 || ix >= sx || iy >= sy) return false
-    if (k < 0.52) return true                            // about a third of the buildings are solid: they cannot be entered
-    if (ix != 0 && iy != 0 && ix != sx - 1 && iy != sy - 1) return ix == sx / 2 && iy == sy / 2 && k > 0.8 // hollow, some with a pillar
-    val side = (h(bx, by, 155) * 4).toInt(); val dp = 1 + (h(bx, by, 156) * ((if (side < 2) sy else sx) - 3)).toInt()
-    return when (side) { // 2-wide door on one side
-        0 -> !(ix == 0 && iy in dp..dp + 1); 1 -> !(ix == sx - 1 && iy in dp..dp + 1)
-        2 -> !(iy == 0 && ix in dp..dp + 1); else -> !(iy == sy - 1 && ix in dp..dp + 1)
-    }
-}
-
 private fun baseWall(lv: Int, x: Int, y: Int) = when (lv) {
     0 -> wall0(x, y); 1 -> wall1(x, y); 2 -> wall2(x, y); 3 -> wall3(x, y); 4 -> wall4(x, y); 5 -> wall5(x, y); 6 -> wall6(x, y)
     7 -> grid(x, y, 5, 110, 0.8, 2); 8 -> grid(x, y, 8, 120, 0.6, 3); 9 -> grid(x, y, 7, 130, 0.7, 2)
-    10 -> wall5(x + 37, y + 11); 12 -> wallCity(x, y); else -> grid(x, y, 4, 140, 0.9, 1)
+    10 -> wall5(x + 37, y + 11); 12 -> City.wall(x, y); else -> grid(x, y, 4, 140, 0.9, 1)
 }
 
 // Every so often a long straight hallway (3 wide, 36-60 cells) is cut through the maze. One candidate per 96x96 sector.
@@ -469,6 +450,7 @@ class Game {
 
     fun enter(lv: Int, arrived: String = "YOU SLIPPED OUT OF REALITY") {
         level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived; resetLevelState()
+        if (lv == 12) City.warm()
         if (lv == 12) say("LEVEL 11 EFFECT  ·  hostile entities are less likely to attack you")
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
         remember(lv)
@@ -707,7 +689,7 @@ val SPECS = listOf(
     TexSpec(intArrayOf(150, 150, 150), intArrayOf(95, 95, 95), intArrayOf(135, 135, 135), intArrayOf(235, 235, 235), 8, 3),    // 9  Grayscale Halls
     TexSpec(intArrayOf(130, 126, 120), intArrayOf(88, 84, 80), intArrayOf(100, 96, 92), intArrayOf(255, 160, 90), 3, 0),      // 10 City of Dusk
     TexSpec(intArrayOf(200, 200, 206), intArrayOf(168, 168, 176), intArrayOf(210, 210, 216), intArrayOf(255, 255, 255), 5, 3), // 11 Threshold
-    TexSpec(intArrayOf(104, 100, 114), intArrayOf(58, 58, 64), intArrayOf(16, 20, 40), intArrayOf(255, 236, 170), 9, 4),         // 12 The City (Level 11)
+    TexSpec(intArrayOf(104, 100, 114), intArrayOf(58, 58, 64), intArrayOf(16, 20, 40), intArrayOf(255, 236, 170), 0, 0),         // 12 The City (Level 11): drawn by City, only the asphalt grain is used
 )
 
 class TexSet(lv: Int) {
@@ -844,13 +826,6 @@ class TexSet(lv: Int) {
                             val tx = x % 32; val ty = y % 32
                             if (ty in 7..25 && abs(abs(tx - 16) - (ty - 6) / 2) < 1) f *= 0.55
                         }
-                        9 -> { // city facade: window grid (about half lit) and a lit shopfront at street level
-                            val wx = x % 16; val wy = y % 16
-                            if (y >= 48) { if (x % 32 in 3..28 && y in 50..61) { r = 255.0; g = 196.0; b = 110.0; f = 1.0 + 0.2 * h(x, y, 208) } else { r = 52.0; g = 50.0; b = 56.0 } }
-                            else if (wx in 3..12 && wy in 3..12) {
-                                if (h(x / 16, y / 16, 207) < 0.5) { r = 255.0; g = 214.0; b = 130.0; f = 1.0 + 0.2 * h(x, y, 209) } else { r = 34.0; g = 44.0; b = 64.0 }
-                            } else if (wy == 0) f *= 0.8
-                        }
                         8 -> { // framed pictures
                             if (x in 10..53 && y in 8..42) {
                                 if (x in 13..50 && y in 11..39) { val v = 70 + 110 * h(x / 3, y / 3, 206); r = v; g = v; b = v; f = 1.0 } else { r = 40.0; g = 40.0; b = 40.0 }
@@ -864,12 +839,8 @@ class TexSet(lv: Int) {
                         3 -> if (x % 16 == 0 || y % 16 == 0) ff *= 0.7                         // tile grout
                     }
                     floor[i] = c(sp.f[0].toDouble(), sp.f[1].toDouble(), sp.f[2].toDouble(), ff)
-                    if (sp.fp == 4) { // asphalt: yellow dashes down the middle, pale kerb at the edges
-                        if (x in 30..33 && y % 32 < 18) floor[i] = pack(206, 176, 58) else if (x < 2 || x > 61) floor[i] = pack(122, 122, 128)
-                    }
                     var tf = 0.9 + 0.15 * h(x, y, 221 + lv); if (x < 2 || y < 2) tf *= 0.75
                     ceil[i] = c(sp.c[0].toDouble(), sp.c[1].toDouble(), sp.c[2].toDouble(), tf)
-                    if (sp.wp == 9 && h(x, y, 230) < 0.015) ceil[i] = pack(240, 240, 255) // night sky: stars
                     panel[i] = if (x < 5 || x > 58 || y < 5 || y > 58) pack(sp.p[0] * 3 / 4, sp.p[1] * 3 / 4, sp.p[2] * 3 / 4) else pack(sp.p[0], sp.p[1], sp.p[2])
                 }
             }
@@ -878,6 +849,188 @@ class TexSet(lv: Int) {
 }
 
 val TEX = Array(LEVELS.size) { TexSet(it) }
+
+// ---------- Level 11: the city ----------
+/** An open night-time city, no ceiling. 16x16 blocks, 6-wide streets (sidewalk, four lanes, sidewalk) with open crossings.
+ *  Lots hold towers of 2..10 floors (a third solid, the rest hollow shells with a door), parks with trees, squares with a monument.
+ *  Above: a star sky with a moon, clouds lit from below and a far skyline that goes on for ever. */
+object City {
+    private fun vn(x: Double, y: Double, s: Int, wrap: Int): Double { // smooth value noise, tiles every `wrap` cells along x
+        val xi = floor(x).toInt(); val yi = floor(y).toInt(); val fx = x - xi; val fy = y - yi
+        val x0 = Math.floorMod(xi, wrap); val x1 = Math.floorMod(xi + 1, wrap)
+        val a = h(x0, yi, s); val b = h(x1, yi, s); val c = h(x0, yi + 1, s); val d = h(x1, yi + 1, s)
+        val sx = fx * fx * (3 - 2 * fx); val sy = fy * fy * (3 - 2 * fy)
+        return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy
+    }
+
+    fun wall(x: Int, y: Int): Boolean {
+        val lx = x and 15; val ly = y and 15
+        if (lx < 6 || ly < 6) return false                 // streets and crossings
+        val bx = x shr 4; val by = y shr 4; val k = h(bx, by, 150)
+        val px = lx - 6; val py = ly - 6                   // 0..9 inside the lot
+        if (k < 0.07) return h(x, y, 157) < 0.045 && px in 1..8 && py in 1..8 // park: scattered trees
+        if (k < 0.14) return px == 4 && py == 4            // square: a monument in the middle
+        val sx = 6 + (h(bx, by, 151) * 5).toInt(); val sy = 6 + (h(bx, by, 152) * 5).toInt() // footprint 6..10
+        val ix = px - ((10 - sx) * h(bx, by, 153)).toInt(); val iy = py - ((10 - sy) * h(bx, by, 154)).toInt()
+        if (ix < 0 || iy < 0 || ix >= sx || iy >= sy) return false
+        if (k < 0.50) return true                          // about a third of the buildings are solid: they cannot be entered
+        if (ix != 0 && iy != 0 && ix != sx - 1 && iy != sy - 1) return ix == sx / 2 && iy == sy / 2 && k > 0.8 // hollow, open to the sky
+        val side = (h(bx, by, 155) * 4).toInt(); val dp = 1 + (h(bx, by, 156) * ((if (side < 2) sy else sx) - 3)).toInt()
+        return when (side) { // 2-wide door on one side
+            0 -> !(ix == 0 && iy in dp..dp + 1); 1 -> !(ix == sx - 1 && iy in dp..dp + 1)
+            2 -> !(iy == 0 && ix in dp..dp + 1); else -> !(iy == sy - 1 && ix in dp..dp + 1)
+        }
+    }
+
+    /** Floors (wall units) of the wall cell: trees 2, monuments 3, buildings 2..3 low-rise, 4..6 mid, 7..10 towers. */
+    fun height(x: Int, y: Int): Int {
+        val bx = x shr 4; val by = y shr 4; val k = h(bx, by, 150)
+        if (k < 0.07) return 2
+        if (k < 0.14) return 3
+        val r = h(bx, by, 160); val q = h(bx, by, 162)
+        return if (r < 0.35) 2 + (q * 2).toInt() else if (r < 0.75) 4 + (q * 3).toInt() else 7 + (q * 4).toInt()
+    }
+
+    /** 0 apartment brick, 1 glass office tower, 2 stone, 3 tree, 4 monument. */
+    fun kind(x: Int, y: Int): Int {
+        val bx = x shr 4; val by = y shr 4; val k = h(bx, by, 150)
+        if (k < 0.07) return 3
+        if (k < 0.14) return 4
+        return if (height(x, y) >= 7) 1 else if (h(bx, by, 161) < 0.5) 0 else 2
+    }
+
+    /** A street lamp stands on lattice cell (ix, iy) if that is open ground in the street grid. */
+    fun lampOk(ix: Int, iy: Int) = ((ix and 15) < 6 || (iy and 15) < 6) && !isWall(12, ix, iy)
+
+    /** Ground colour at (wx, wy): asphalt with lane lines and zebra crossings, sidewalks, park grass, plaza tiles, lot pavement. `base` = asphalt grain. */
+    fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int {
+        val lx = ix and 15; val ly = iy and 15; val fx = wx - ix; val fy = wy - iy
+        val n = 0.85 + 0.3 * ((base and 255) / 255.0)
+        val inV = lx < 6; val inH = ly < 6
+        if (!inV && !inH) {
+            val k = h(ix shr 4, iy shr 4, 150)
+            if (k < 0.07) { val v = 0.85 + 0.3 * h(ix, iy, 171); return pack((54 * n * v).toInt(), (98 * n * v).toInt(), (48 * n * v).toInt()) } // park grass
+            val t = if (fx < 0.04 || fy < 0.04) 0.8 else 1.0
+            return if (k < 0.14) pack((132 * n * t).toInt(), (126 * n * t).toInt(), (118 * n * t).toInt())   // square
+                   else pack((92 * n).toInt(), (90 * n).toInt(), (88 * n).toInt())                           // lot pavement
+        }
+        var side = false; var white = false; var yellow = false
+        if (inV && inH) { // crossing: corner sidewalks, zebra crossings on the four arms
+            if ((lx == 0 || lx == 5) && (ly == 0 || ly == 5)) side = true
+            else if (lx in 1..4 && (ly == 0 || ly == 5)) white = ((wx * 3).toInt() and 1) == 0
+            else if (ly in 1..4 && (lx == 0 || lx == 5)) white = ((wy * 3).toInt() and 1) == 0
+        } else if (inV) {
+            if (lx == 0 || lx == 5) side = true
+            else if (abs(wx - (ix - lx) - 3.0) < 0.07 && ((wy * 0.5).toInt() and 1) == 0) yellow = true
+        } else {
+            if (ly == 0 || ly == 5) side = true
+            else if (abs(wy - (iy - ly) - 3.0) < 0.07 && ((wx * 0.5).toInt() and 1) == 0) yellow = true
+        }
+        return if (side) { val t = if (fx < 0.04 || fy < 0.04) 0.8 else 1.0; pack((150 * n * t).toInt(), (148 * n * t).toInt(), (142 * n * t).toInt()) }
+        else if (white) pack(222, 222, 216) else if (yellow) pack(212, 180, 62)
+        else pack((62 * n).toInt(), (62 * n).toInt(), (68 * n).toInt())
+    }
+
+    // --- facade textures: 0..11 = 3 kinds x 4 variants (lit windows are marked with alpha 0xFE so they glow), 12 canopy, 13 trunk, 14..17 shopfronts ---
+    private fun mk(r: Int, g: Int, b: Int, lit: Boolean = false) = if (lit) (pack(r, g, b) and 0xFFFFFF) or (0xFE shl 24) else pack(r, g, b)
+    private fun nz(x: Int, y: Int, sd: Int, amp: Double) = 1.0 + amp * (h(x, y, sd) - 0.5)
+
+    private fun facade(kind: Int, v: Int): IntArray {
+        val t = IntArray(4096); val sd = 400 + kind * 10 + v
+        for (y in 0 until 64) for (x in 0 until 64) t[y * 64 + x] = when (kind) {
+            0 -> { // apartment: brick, a window and a sill per 16x16 cell, about half lit
+                val wx = x % 16; val wy = y % 16
+                if (wx in 4..11 && wy in 3..12) {
+                    if (wx == 4 || wx == 11 || wy == 3 || wy == 12) mk(60, 40, 34)
+                    else if (h(x / 16, y / 16, sd) < 0.5) { val f = 1.0 - 0.25 * (wy - 4) / 8.0; mk((255 * f).toInt(), (206 * f).toInt(), (120 * f).toInt(), true) }
+                    else mk(26, 34, 52)
+                } else if (wy == 13) mk(168, 150, 132)
+                else {
+                    val joint = (y % 4 == 3) || (if ((y / 4) % 2 == 0) x % 8 == 0 else (x + 4) % 8 == 0)
+                    val f = nz(x, y, sd + 1, 0.25)
+                    if (joint) mk((96 * f).toInt(), (72 * f).toInt(), (64 * f).toInt()) else mk((136 * f).toInt(), (80 * f).toInt(), (64 * f).toInt())
+                }
+            }
+            1 -> { // glass tower: dark curtain wall, 8x8 panes, about a third lit (warm or cool)
+                val cx = x % 8; val cy = y % 8
+                if (cx == 0 || cy == 0) mk(70, 82, 104)
+                else if (h(0, y / 8, sd + 7) < 0.65 && h(x / 8, y / 8, sd) < 0.55) { if (h(x / 8, y / 8, sd + 3) < 0.4) mk(255, 224, 160, true) else mk(205, 228, 255, true) }
+                else { val sh = 1.0 - 0.3 * ((x + y) % 24) / 24.0; mk((30 * sh + 10).toInt(), (48 * sh + 14).toInt(), (84 * sh + 20).toInt()) }
+            }
+            2 -> { // stone: pale limestone, tall narrow windows, cornice lines
+                val wx = x % 16; val wy = y % 16
+                if (wx in 5..10 && wy in 2..12) {
+                    if (wx == 5 || wx == 10 || wy == 2 || wy == 12) mk(100, 92, 80) else if (h(x / 16, y / 16, sd) < 0.45) mk(255, 214, 130, true) else mk(32, 38, 56)
+                } else if (wy == 0) mk(120, 114, 102)
+                else { val f = nz(x, y, sd + 1, 0.2); mk((184 * f).toInt(), (176 * f).toInt(), (160 * f).toInt()) }
+            }
+            else -> mk(0, 0, 0)
+        }
+        return t
+    }
+
+    val tex: Array<IntArray> by lazy {
+        Array(19) { i ->
+            when {
+                i < 12 -> facade(i / 4, i % 4)
+                i == 18 -> IntArray(4096) { j -> val x = j % 64; val y = j / 64; val f = 0.9 + 0.2 * h(x, y, 413); if (y % 16 == 0) mk((120 * f).toInt(), (116 * f).toInt(), (108 * f).toInt()) else mk((196 * f).toInt(), (192 * f).toInt(), (182 * f).toInt()) } // monument: plain carved stone
+                i == 12 -> IntArray(4096) { j -> val x = j % 64; val y = j / 64; var f = 0.6 + 0.8 * h(x, y, 410); if (h(x / 3, y / 3, 411) < 0.3) f *= 1.3; mk((34 * f).toInt(), (92 * f).toInt(), (40 * f).toInt()) }
+                i == 13 -> IntArray(4096) { j -> val x = j % 64; val y = j / 64; val f = 0.7 + 0.6 * h(x, y / 8, 412); mk((84 * f).toInt(), (58 * f).toInt(), (36 * f).toInt()) }
+                else -> { // shopfronts: lit display windows and a door under a neon sign
+                    val sign = arrayOf(intArrayOf(255, 120, 90), intArrayOf(120, 220, 255), intArrayOf(255, 140, 200), intArrayOf(150, 255, 160))[i - 14]
+                    val glass = arrayOf(intArrayOf(255, 224, 168), intArrayOf(255, 200, 120), intArrayOf(214, 236, 255), intArrayOf(255, 232, 190))[i - 14]
+                    IntArray(4096) { j -> val x = j % 64; val y = j / 64
+                        if (y < 5) mk(sign[0], sign[1], sign[2], true)
+                        else if (y < 8) mk(40, 38, 46)
+                        else if (x in 27..36 && y > 14) mk(30, 28, 36)               // door
+                        else if (x in 4..59 && y in 10..56) { if (x == 26 || x == 37) mk(52, 50, 58) else mk(glass[0], glass[1], glass[2], true) }
+                        else mk(46, 44, 52) }
+                }
+            }
+        }
+    }
+
+    /** 2048 x 256 panorama: azimuth around, elevation 0..90 degrees upward. */
+    val sky: IntArray by lazy {
+        val w = 2048; val hh = 256; val s = IntArray(w * hh)
+        for (v in 0 until hh) {
+            val e = v / 255.0; val glow = max(0.0, 1.0 - e / 0.30).let { it * it } // city light pollution near the horizon
+            val r0 = 10 + 6 * e + 90 * glow; val g0 = 12 + 12 * e + 50 * glow; val b0 = 34 + 30 * e + 56 * glow
+            for (u in 0 until w) {
+                var r = r0; var g = g0; var b = b0
+                val cl = ((vn(u / 128.0, v / 14.0, 251, 16) - 0.52) / 0.48).coerceIn(0.0, 1.0) * (0.55 - 0.45 * e).coerceAtLeast(0.0) // clouds, lit from below
+                if (cl > 0) { r += (96 - r) * cl * 0.6; g += (66 - g) * cl * 0.6; b += (98 - b) * cl * 0.6 }
+                if (cl < 0.25 && e > 0.05 && h(u, v, 240) < 0.0016 + 0.0018 * e) { val sb = 140 + 115 * h(u, v, 241); r = sb; g = sb; b = sb * 0.95 + 10 }
+                s[v * w + u] = pack(r.toInt(), g.toInt(), b.toInt())
+            }
+        }
+        val uc = 340; val vc = 118 // the moon (5.69 px per degree across, 2.84 up)
+        for (v in vc - 60..vc + 60) for (u in uc - 100..uc + 100) {
+            val dd = hypot((u - uc) / 5.69, (v - vc) / 2.84); val o = v * w + u; val c = s[o]
+            if (dd < 3.4) { val f = (if (vn(u / 6.0, v / 6.0, 261, 1000) < 0.35) 0.82 else 1.0) * (0.95 + 0.05 * h(u, v, 262)); s[o] = pack((238 * f).toInt(), (238 * f).toInt(), (224 * f).toInt()) }
+            else if (dd < 16) { val gl = exp(-(dd - 3.4) / 3.5) * 0.5; s[o] = pack(((c shr 16) and 255) + (70 * gl).toInt(), ((c shr 8) and 255) + (80 * gl).toInt(), (c and 255) + (110 * gl).toInt()) }
+        }
+        fun layer(seed: Int, hMin: Int, hMax: Int, wMin: Int, wMax: Int, base: Int, win: Int, winP: Double) { // skyline silhouettes with lit windows
+            var u = 0
+            while (u < w) {
+                val bw = wMin + (h(u, 3, seed) * (wMax - wMin)).toInt()
+                var ht = hMin + (h(u, 5, seed).let { it * it } * (hMax - hMin)).toInt()
+                val tower = h(u, 7, seed) < 0.06
+                if (tower) ht += 12 + (h(u, 9, seed) * 14).toInt() // the odd tower
+                for (uu in u until min(w, u + bw)) for (v in 0 until min(ht, hh)) {
+                    s[v * w + uu] = if (uu % 3 == 1 && v % 4 == 2 && v > 1 && uu > u && uu < u + bw - 1 && h(uu, v, seed + 1) < winP) win else base
+                }
+                if (tower && ht + 1 < hh) s[ht * w + u + bw / 2] = pack(255, 60, 50) // aircraft warning light
+                u += bw + (h(u, 11, seed) * 3).toInt()
+            }
+        }
+        layer(300, 4, 15, 8, 26, pack(46, 36, 64), pack(190, 150, 110), 0.30)  // far, hazy
+        layer(320, 3, 22, 14, 40, pack(14, 14, 26), pack(255, 214, 130), 0.28) // near, dark
+        s
+    }
+
+    fun warm() { tex; sky } // build the textures and the sky now (called when the level starts)
+}
 val MANILA = TexSet(99)
 private val FLICKER = arrayOf(doubleArrayOf(0.12, 0.20, 0.27), doubleArrayOf(0.20, 0.28, 0.40), doubleArrayOf(0.15, 0.25, 0.32),
     doubleArrayOf(0.25, 0.35, 0.45), doubleArrayOf(0.15, 0.22, 0.30), doubleArrayOf(0.18, 0.30, 0.38), doubleArrayOf(0.02, 0.05, 0.05),
@@ -904,6 +1057,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private inner class Lamps {
         val kx = IntArray(256); val ky = IntArray(256); val fr = IntArray(256); val v = DoubleArray(256)
         var mx = 0; var my = 0; var mv = 1.0; var mf = -1
+        val hmx = IntArray(8); val hmy = IntArray(8); val hsd = IntArray(8); val hht = IntArray(8); val hpp = DoubleArray(8) // wall hits along one city ray
         fun at(lv: Int, x: Int, y: Int, t: Double): Double {
             if (mf == frame && x == mx && y == my) return mv // neighbouring pixels almost always share the lamp
             val i = ((x * 73856093) xor (y * 19349663)) and 255
@@ -915,6 +1069,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
     private val bands = Array(nt) { Lamps() }
     private val rowTmp = IntArray(W)
+    private val colU = IntArray(W); private val rowV = IntArray(H) // city sky lookup: azimuth per column, elevation per row
 
     /** body(band, from, to) over [0, n) in `nt` slices; the last slice runs on the calling thread. */
     private fun par(n: Int, body: (Int, Int, Int) -> Unit) {
@@ -934,6 +1089,78 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
 
     private fun sq(a: Double) = a * a
+    private val HZC = pack(100, 62, 90) // horizon glow: distant ground fades into it, matching the sky
+    private fun blend(a: Int, b: Int, t: Int): Int { val u = 256 - t
+        return pack((((a shr 16) and 255) * u + ((b shr 16) and 255) * t) shr 8, (((a shr 8) and 255) * u + ((b shr 8) and 255) * t) shr 8, ((a and 255) * u + (b and 255) * t) shr 8) }
+
+    /** City rows: above the horizon the star sky (no ceiling), below it street, sidewalk, grass, hazing into the horizon glow. */
+    private fun cityRows(px: IntArray, lp: Lamps, r0: Int, r1: Int, hz: Int, vs: Double, fk: Double, gl: Double, t: Double,
+                         x: Double, y: Double, dx: Double, dy: Double, plX: Double, plY: Double, d: LevelDef, ts: TexSet) {
+        val sky = City.sky; val tn = d.tint
+        for (yy in r0 until r1) {
+            val dr = yy - hz
+            if (dr <= 0) { val base = rowV[yy] * 2048; for (xx in 0 until W) px[yy * W + xx] = sky[base + colU[xx]]; continue }
+            val rd = 0.5 * H * vs / dr
+            val fog = 1.0 / (1 + rd * rd * fk)
+            val ha = ((1.0 - 1.0 / (1 + rd * rd * 0.0007 * Settings.fogScale)) * 256).toInt() // distance haze
+            for (xx in 0 until W) {
+                val cx = camX[xx]
+                val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
+                val ix = floor(wx).toInt(); val iy = floor(wy).toInt()
+                val tx = ((wx - ix) * 64).toInt() and 63; val ty = ((wy - iy) * 64).toInt() and 63
+                val lit = mul(City.ground(wx, wy, ix, iy, ts.floor[ty * 64 + tx]), lightAt(d, lp, wx, wy, t) * gl * fog * 0.95, tn)
+                px[yy * W + xx] = if (ha > 0) blend(lit, HZC, ha) else lit
+            }
+        }
+    }
+
+    /** One city column. The ray keeps going past low buildings so taller ones behind show above them; hits are drawn far to near. */
+    private fun cityCol(px: IntArray, xx: Int, lp: Lamps, x: Double, y: Double, rx: Double, ry: Double, hz: Int, vs: Double, fk: Double, gl: Double, t: Double, d: LevelDef) {
+        var mapX = floor(x).toInt(); var mapY = floor(y).toInt()
+        val ddx = abs(1 / rx); val ddy = abs(1 / ry)
+        val stepX = if (rx < 0) -1 else 1; val stepY = if (ry < 0) -1 else 1
+        var sdx = if (rx < 0) (x - mapX) * ddx else (mapX + 1 - x) * ddx
+        var sdy = if (ry < 0) (y - mapY) * ddy else (mapY + 1 - y) * ddy
+        var side = 0; var n = 0; var cnt = 0; var topBest = Int.MAX_VALUE
+        while (n++ < 72) {
+            if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
+            if (!isWall(12, mapX, mapY)) continue
+            val ht = City.height(mapX, mapY)
+            val pp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
+            val lh = (H * vs / pp).toInt().coerceAtLeast(1)
+            val top = hz + lh / 2 - lh * ht
+            if (top < topBest) { lp.hmx[cnt] = mapX; lp.hmy[cnt] = mapY; lp.hsd[cnt] = side; lp.hht[cnt] = ht; lp.hpp[cnt] = pp; topBest = top; cnt++ }
+            if (top <= 0 || cnt == 8) break
+        }
+        zb[xx] = if (cnt > 0) lp.hpp[0] else 72.0
+        val tex = City.tex; val tn = d.tint
+        for (k in cnt - 1 downTo 0) {
+            val mx = lp.hmx[k]; val my = lp.hmy[k]; val sd = lp.hsd[k]; val ht = lp.hht[k]; val pp = lp.hpp[k]
+            val hx = x + pp * rx; val hy = y + pp * ry
+            var tx = (((if (sd == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
+            if ((sd == 0 && rx > 0) || (sd == 1 && ry < 0)) tx = 63 - tx
+            val fogF = 1.0 / (1 + pp * pp * fk); val sideF = if (sd == 1) 0.82 else 1.0
+            val kk = (lightAt(d, lp, hx, hy, t) * gl * fogF * sideF * 256).toInt().coerceIn(0, 640)
+            val ke = (256 * (0.45 + 0.55 * fogF) * sideF).toInt() // lit windows glow: they dim with distance but not with the lamps
+            val kr = kk * tn[0]; val kg = kk * tn[1]; val kb = kk * tn[2]; val er = ke * tn[0]; val eg = ke * tn[1]; val eb = ke * tn[2]
+            val ha = ((1.0 - 1.0 / (1 + pp * pp * 0.0007 * Settings.fogScale)) * 256).toInt()
+            val lh = (H * vs / pp).toInt().coerceAtLeast(1)
+            val bottom = hz + lh / 2; val top = bottom - lh * ht
+            val y0 = max(0, top); val y1 = min(H - 1, bottom)
+            val step = 64.0 / lh; var tpos = (y0 - top) * step
+            val kind = City.kind(mx, my); val vv = (mx * 7 + my * 13) and 3; val unst = unstable(12, mx, my)
+            for (yy in y0..y1) {
+                val tp = tpos.toInt(); tpos += step
+                val unit = tp shr 6 // floors counted from the roof line; the last one is the ground floor
+                val ti = if (kind == 4) 18 else if (kind == 3) (if (unit >= ht - 1) 13 else 12) else if (unit >= ht - 1) 14 + vv else kind * 4 + ((vv + unit) and 3)
+                val tx2 = if (unst) (tx + (sin(t * 11 + yy * 0.25) * 4).toInt()) and 63 else tx
+                val c = tex[ti][(tp and 63) * 64 + tx2]
+                var o = if ((c ushr 24) == 0xFE) mul2(c, er, eg, eb) else mul2(c, kr, kg, kb)
+                if (unst) o = pack((((o shr 16) and 255) * 3) / 4, ((o shr 8) and 255) + 25, (o and 255) + 60) // cold, wobbling = not solid
+                px[yy * W + xx] = if (ha > 0) blend(o, HZC, ha) else o
+            }
+        }
+    }
     private fun sc(r: Int, g: Int, b: Int, dim: Double) = pack((r * dim).toInt(), (g * dim).toInt(), (b * dim).toInt())
 
     private fun mul(c: Int, f: Double, tn: IntArray): Int {
@@ -963,8 +1190,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     /** Light pooled around each ceiling panel (one every `period` cells). */
     private fun lightAt(d: LevelDef, lp: Lamps, wx: Double, wy: Double, t: Double): Double {
         val p = d.period
-        val kx = floor((wx - 1.5) * d.ip + 0.5).toInt(); val ky = floor((wy - 1.5) * d.ip + 0.5).toInt()
-        val ddx = wx - (kx * p + 1.5); val ddy = wy - (ky * p + 1.5)
+        val kx = floor((wx - d.lamp0) * d.ip + 0.5).toInt(); val ky = floor((wy - d.lamp0) * d.ip + 0.5).toInt()
+        val ddx = wx - (kx * p + d.lamp0); val ddy = wy - (ky * p + d.lamp0)
         val lamp = d.ambient + lp.at(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff)
         return if (lant > 0.0) lamp + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35) else lamp
     }
@@ -1025,6 +1252,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                 else if (r2 > 0.15) sc(206, 140, 60, dim)
                 else sc(250, 205, 92, dim)
             }
+            9 -> if (v < 0.06 && abs(u) < 0.9) pack(255, 236, 170) else if (abs(u) < 0.18) sc(70, 72, 80, dim) else 0 // street lamp
             7 -> { // ration: tin can
                 if (abs(u) > 0.7 || v < 0.15) 0
                 else if (v < 0.3 || v > 0.9) sc(196, 200, 204, dim)
@@ -1063,8 +1291,13 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         val fk = d.fogK * Settings.fogScale // Options > Fog scales every level's own fog
 
         // floor + ceiling (rows are split between threads)
+        if (lv == 12) { // the city: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
+            for (xx in 0 until W) colU[xx] = (((atan2(dy + plY * camX[xx], dx + plX * camX[xx]) / (2 * PI)) * 2048).toInt()) and 2047
+            for (yy in 0 until min(H, hz + 1)) rowV[yy] = (atan((hz - yy) / (H * vs)) / (PI / 2) * 255).toInt().coerceIn(0, 255)
+        }
         par(H) { b, r0, r1 ->
             val lp = bands[b]
+            if (lv == 12) { cityRows(px, lp, r0, r1, hz, vs, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
             for (yy in r0 until r1) {
                 val dr = yy - hz
                 if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
@@ -1089,6 +1322,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         // textured walls (DDA; columns are split between threads)
         par(W) { b, c0, c1 ->
             val lp = bands[b]
+            if (lv == 12) { for (xx in c0 until c1) cityCol(px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, fk, gl, t, d); return@par }
             for (xx in c0 until c1) {
                 val cx = camX[xx]
                 val rx = dx + plX * cx; val ry = dy + plY * cx
@@ -1136,6 +1370,10 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
             items.add(doubleArrayOf(o[0], o[1], 0.0))
         }
+        if (lv == 12) { // street lamps on the lamp lattice (the light pools come from lightAt)
+            for (ky in floor((y - 14 - 0.5) / 8).toInt()..floor((y + 14 - 0.5) / 8).toInt()) for (kx in floor((x - 14 - 0.5) / 8).toInt()..floor((x + 14 - 0.5) / 8).toInt())
+                if (City.lampOk(kx * 8, ky * 8)) items.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, 9.0))
+        }
         val friendly = Settings.explore
         for (e in g.entities) items.add(if (friendly && e.type in 1..4) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
         for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) 7.0 else 8.0))
@@ -1147,8 +1385,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val hk = when (type) { 1 -> 0.6; 5 -> 0.55; 6 -> 0.45; 7 -> 0.2; 8 -> 0.26; else -> 0.9 }
-            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 0.9; 6 -> 1.0; 7 -> 0.9; 8 -> 0.55; else -> 0.42 }
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.55; 6 -> 0.45; 7 -> 0.2; 8 -> 0.26; 9 -> 1.7; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 0.9; 6 -> 1.0; 7 -> 0.9; 8 -> 0.55; 9 -> 0.25; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
             val bottom = hz + (full / 2).toInt(); val top = bottom - sh
