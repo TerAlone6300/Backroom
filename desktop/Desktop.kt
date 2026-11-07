@@ -274,7 +274,7 @@ fun main(args: Array<String>) {
             // difficulty
             val dl = (w * 0.64).toInt(); val dw = (w * 0.28).toInt(); val bh = hh / 14; val gp = hh / 90; var y = (hh * 0.34).toInt()
             txt(g2, "DIFFICULTY", dl, (hh * 0.30).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
-            val cols = arrayOf(Color(150, 200, 150), ac, Color(240, 160, 80), Color(235, 70, 55))
+            val cols = arrayOf(Color(150, 200, 150), ac, Color(240, 160, 80), Color(235, 70, 55), Color(110, 210, 200))
             for (i in DIFFS.indices) {
                 btn(g2, Rectangle(dl, y, dw, bh), DIFFS[i].name.uppercase(), Settings.diff == i, cols[i]) { Settings.putDiff(i); Store.saveProfile() }
                 y += bh + gp
@@ -308,7 +308,7 @@ fun main(args: Array<String>) {
             g2.color = ac; g2.fillRoundRect(14, 14, 5, sz * 4 + 18, 4, 4)
             txt(g2, "${d.label}  ·  ${d.name}", 30, 14 + sz + 6, spaced(Font("SansSerif", Font.BOLD, sz), 0.2f), ac, false)
             txt(g2, status, 30, 14 + 2 * sz + 10, Font("SansSerif", Font.PLAIN, sz - 1), Color(225, 215, 180), false)
-            txt(g2, "${fps.toInt()} FPS", 30, 14 + 3 * sz + 14, Font("SansSerif", Font.PLAIN, sz - 3), Color(160, 155, 130), false)
+            txt(g2, "${fps.toInt()} FPS" + (if (Settings.explore) "  ·  EXPLORE" else ""), 30, 14 + 3 * sz + 14, Font("SansSerif", Font.PLAIN, sz - 3), Color(160, 155, 130), false)
 
             // food bar (blinks red when low) and supplies
             val fy = 14 + sz * 4 + 26; val low = g.hunger < 0.2

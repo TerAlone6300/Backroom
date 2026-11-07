@@ -366,9 +366,9 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         nextFog = drawSlider(c, "FOG", Settings.fogName(), tl, tr, h * 0.56f, h * 0.64f, Settings.fog / 100f,
             Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100f, nm, Settings.fog == f) })
         // difficulty
-        val dl = w * 0.64f; val dr = w * 0.92f; val bh = 30 * dp; val gp = 6 * dp; var y = h * 0.34f
+        val dl = w * 0.64f; val dr = w * 0.92f; val bh = 26 * dp; val gp = 5 * dp; var y = h * 0.34f
         small(c, "DIFFICULTY", dl, h * 0.30f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
-        val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55))
+        val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55), Color.rgb(110, 210, 200))
         for (i in DIFFS.indices) {
             btn(c, RectF(dl, y, dr, y + bh), DIFFS[i].name.uppercase(), Settings.diff == i, cols[i]) { Settings.putDiff(i); Store.saveProfile() }
             y += bh + gp
@@ -423,7 +423,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             n.state == 1 -> "ONLINE · ${n.others.size + 1} PLAYERS${if (g.isolated()) " · ISOLATED" else ""}"; else -> "CONNECTION LOST"
         }
         pText.textSize = 10.5f * dp; pText.color = Color.rgb(225, 215, 180); c.drawText(status, 26 * dp, 50 * dp, pText)
-        pText.textSize = 9.5f * dp; pText.color = Color.rgb(160, 155, 130); c.drawText("${fps.toInt()} FPS", 26 * dp, 66 * dp, pText)
+        pText.textSize = 9.5f * dp; pText.color = Color.rgb(160, 155, 130); c.drawText("${fps.toInt()} FPS" + (if (Settings.explore) "  ·  EXPLORE" else ""), 26 * dp, 66 * dp, pText)
 
         // food bar (blinks red when low)
         val low = g.hunger < 0.2

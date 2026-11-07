@@ -23,7 +23,8 @@ fun h(x: Int, y: Int, s: Int): Double {
 class LevelDef(val id: Int, val label: String, val name: String, val blurb: String, val entities: String, val eType: Int, val eCount: Int,
                val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
                val lantern: Double = 0.0, val isolated: Boolean = false,
-               val calm: Double = 1.0, val cast: IntArray = intArrayOf()) { // calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
+               val calm: Double = 1.0, val cast: IntArray = intArrayOf(),
+               val safe: Boolean = false) { // safe: rated Safe & Secure (Explore noclips favour these); calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
     val ip = 1.0 / period
 }
 
@@ -34,14 +35,14 @@ val LEVELS = listOf(
     LevelDef(3, "LEVEL 3", "ELECTRICAL STATION", "Humming transformers in a grid of machines. Hunters follow the sparks.", "HOUNDS", 1, 4, 4, 0.06, 0.50, 0.028, intArrayOf(230, 240, 256), 0x6FA8FF),
     LevelDef(4, "LEVEL 4", "ABANDONED OFFICE", "Dead cubicles, stained ceilings. Someone is still typing.", "SKIN-STEALERS", 3, 2, 4, 0.18, 0.34, 0.018, intArrayOf(256, 252, 240), 0xD8CFA8),
     LevelDef(5, "LEVEL 5", "TERROR HOTEL", "Red carpet, endless corridors, a door for every secret.", "SMILERS", 2, 3, 4, 0.08, 0.45, 0.026, intArrayOf(256, 225, 190), 0xD04A4A),
-    LevelDef(6, "LEVEL 37", "THE POOLROOMS", "Warm tiled halls and still water. Finally, peace.", "NONE", 0, 0, 5, 0.55, 0.12, 0.006, intArrayOf(236, 250, 256), 0x6FD8E8),
+    LevelDef(6, "LEVEL 37", "THE POOLROOMS", "Warm tiled halls and still water. Finally, peace.", "NONE", 0, 0, 5, 0.55, 0.12, 0.006, intArrayOf(236, 250, 256), 0x6FD8E8, safe = true),
     LevelDef(7, "LEVEL 6", "LIGHTS OUT", "Pitch-dark halls. Your lantern is all you have.", "HOUNDS", 1, 2, 3, 0.015, 0.50, 0.030, intArrayOf(256, 246, 214), 0xE0C060, lantern = 1.1),
-    LevelDef(8, "LEVEL 75", "LIMINALITY", "Sand drifts through quiet corridors. You have been here before.", "NONE", 0, 0, 5, 0.42, 0.12, 0.010, intArrayOf(256, 244, 215), 0xE6C98A),
-    LevelDef(9, "LEVEL 139", "GRAYSCALE HALLS", "Colourless concrete. The paintings look back.", "NONE", 0, 0, 4, 0.14, 0.38, 0.016, intArrayOf(236, 236, 236), 0xBEBEBE),
-    LevelDef(10, "LEVEL 182", "CITY OF DUSK", "A sunset that never sets over empty concrete rooms.", "NONE", 0, 0, 4, 0.22, 0.18, 0.014, intArrayOf(256, 200, 150), 0xFF9A5A),
-    LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true),
+    LevelDef(8, "LEVEL 75", "LIMINALITY", "Sand drifts through quiet corridors. You have been here before.", "NONE", 0, 0, 5, 0.42, 0.12, 0.010, intArrayOf(256, 244, 215), 0xE6C98A, safe = true),
+    LevelDef(9, "LEVEL 139", "GRAYSCALE HALLS", "Colourless concrete. The paintings look back.", "NONE", 0, 0, 4, 0.14, 0.38, 0.016, intArrayOf(236, 236, 236), 0xBEBEBE, safe = true),
+    LevelDef(10, "LEVEL 182", "CITY OF DUSK", "A sunset that never sets over empty concrete rooms.", "NONE", 0, 0, 4, 0.22, 0.18, 0.014, intArrayOf(256, 200, 150), 0xFF9A5A, safe = true),
+    LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true, safe = true),
     LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "FACELINGS · HOUNDS · CRANES", 4, 8, 6, 0.30, 0.10, 0.009, intArrayOf(240, 238, 256), 0xFFC857,
-        calm = 0.45, cast = intArrayOf(4, 5, 1, 4, 6, 5, 1, 4)) // 3 Facelings, 2 Lucky Cranes, 2 Hounds, 1 Living Pizza (scaled by difficulty)
+        calm = 0.45, cast = intArrayOf(4, 5, 1, 4, 6, 5, 1, 4), safe = true) // 3 Facelings, 2 Lucky Cranes, 2 Hounds, 1 Living Pizza (scaled by difficulty)
 )
 
 /** The Manila Room: the one and only room of Level 0 where isolation does not apply. */
@@ -260,6 +261,7 @@ object Settings {
         val f = (t.coerceIn(0.0, 1.0) * 100).roundToInt()
         return FOG_PRESETS.firstOrNull { abs(it.first - f) <= 3 }?.first ?: f
     }
+    val explore get() = DIFFS[diff].explore
     fun putDiff(i: Int) { diff = i.coerceIn(0, DIFFS.size - 1) }
     val PRESETS = listOf(30 to "Narrow", 60 to "Normal", 110 to "Quake Pro")
     fun set(f: Int) { fov = f.coerceIn(FOV_MIN, FOV_MAX) }
@@ -275,12 +277,21 @@ object Settings {
 /** Difficulty multipliers (Normal = the original game): entity count, entity speed, how far entities notice you,
  *  sprint drain / refill, spawn distance, catch distance, hunger rate. */
 class Diff(val name: String, val blurb: String, val count: Double, val speed: Double, val sight: Double, val drain: Double,
-           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double)
+           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double, val explore: Boolean = false)
+/** Explore mode knobs: everything to tune after player feedback is in this one place. */
+object ExploreRules {
+    /** false = levels you pass through are NOT remembered (they never reach the unlocked-levels drawer). true = remembered like in the other modes. */
+    const val SAVE_VISITED_LEVELS = false
+    /** Chance (0..1) that a noclip drops you on a Safe & Secure level (LevelDef.safe) instead of the wall's usual destination. */
+    const val SAFE_NOCLIP_CHANCE = 0.8
+    // Monsters are friendly in Explore: they wander and tag along at a polite distance, never chase or hurt (see Game.update).
+}
 val DIFFS = listOf(
     Diff("Easy", "Fewer, slower entities. Longer sprint.", 0.5, 0.8, 0.8, 0.7, 1.25, 1.4, 0.5, 0.6),
     Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0),
     Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65, 1.25),
-    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6))
+    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6),
+    Diff("Explore", "Friendly monsters. Safe levels.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.6, explore = true))
 
 class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
                val pitch: Double, val stamina: Double, val playSec: Double,
@@ -385,6 +396,14 @@ class Supply(val x: Int, val y: Int, val type: Int)
 class Ghost(var x: Double, var y: Double, val type: Int, var life: Double)
 
 /** Supplies are scattered through every level from 1 up. Level 0 keeps them all inside the Manila Room. */
+/** Where noclip wall `k` of level `lv` leads. In Explore mode, most of the time (ExploreRules.SAFE_NOCLIP_CHANCE) a Safe & Secure level instead. */
+fun noclipDest(lv: Int, k: Int): Int {
+    val fixed = NOCLIP_TARGETS[lv][k]
+    if (!Settings.explore || Math.random() >= ExploreRules.SAFE_NOCLIP_CHANCE) return fixed
+    val safe = LEVELS.indices.filter { LEVELS[it].safe && it != lv }
+    return if (safe.isEmpty()) fixed else safe[(Math.random() * safe.size).toInt()]
+}
+
 fun supplyAt(lv: Int, x: Int, y: Int): Int {
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
@@ -419,6 +438,8 @@ class Game {
     fun say(s: String) { notice = s; noticeT = 3.5 }
     init { enter(0) }
 
+    /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
+    private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
     private fun resetLevelState() { taken.clear(); extra.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
@@ -434,7 +455,7 @@ class Game {
     fun isolated() = LEVELS[level].isolated && !(level == 0 && Manila.inside(x, y))
 
     private var ncK = 0
-    private fun noclipTarget() = NOCLIP_TARGETS[level][ncK]
+    private fun noclipTarget() = noclipDest(level, ncK)
 
     private fun findFree(cx: Double, cy: Double): Pair<Double, Double> {
         for (r in 0..40) for (dy in -r..r) for (dx in -r..r) {
@@ -449,7 +470,7 @@ class Game {
         level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived; resetLevelState()
         if (lv == 12) say("LEVEL 11 EFFECT  ·  hostile entities are less likely to attack you")
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
-        Progress.unlock(lv)
+        remember(lv)
         // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
         // Other levels drop you near the origin so players can regroup.
         val p = if (lv == 0) { val ang0 = Math.random() * 6.283; val d0 = 60 + Math.random() * 200
@@ -480,7 +501,7 @@ class Game {
         arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
         a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
         resetLevelState(); hunger = s.hunger.coerceIn(0.0, 1.0); rations = s.rations.coerceIn(0, 9); water = s.water.coerceIn(0, 9); lobbyT = s.lobbyT.coerceAtLeast(0.0); starveT = 0.0
-        Progress.unlock(level)
+        remember(level)
         val p = findFree(s.x, s.y); x = p.first; y = p.second
         spawnEntities()
     }
@@ -540,6 +561,14 @@ class Game {
         val calm = LEVELS[level].calm
         for (e in entities) {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
+            if (dif.explore && e.type in 1..4) { // Explore: every monster is friendly. It wanders, and tags along at a polite distance
+                val follow = d < 12 && d > 3.5
+                if (follow) e.dir = atan2(ey, ex) + sin(levelT * 0.7 + e.x) * 0.5 else e.dir += (Math.random() - 0.5) * dt * 2
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (follow) 1.4 else 0.6) * dt)
+                if (r.first == e.x && r.second == e.y) e.dir += 1.6
+                e.x = r.first; e.y = r.second; e.chase = false
+                continue
+            }
             if (e.type != 5 && e.type != 6) pr = max(pr, 1 - d / 12)
             val sight = dif.sight * (if (calm < 1.0 && !(run && d < 12)) calm else 1.0) // Level 11 Effect: hostiles mostly ignore you, unless you run past them
             if (e.type == 3) { // Skin-Stealer: walks like a player, patiently closes in
@@ -953,7 +982,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
 
     /** Sprite shapes in (u,v) space; u in -1..1 across, v in 0..1 top to bottom. 0 = transparent. */
-    private fun sprite(type: Int, u: Double, v: Double, dim: Double): Int {
+    private fun sprite(type: Int, u: Double, v: Double, dim: Double, fr: Boolean = false): Int { // fr = friendly (Explore): green eyes, soft glow
         val dark = pack((16 * dim).toInt(), (14 * dim).toInt(), (10 * dim).toInt())
         return when (type) {
             0, 3, 4 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow; type 4 (Faceling) has a pale head with misplaced features
@@ -969,7 +998,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                     else if (sq((u + 0.12) / 0.06) + sq((v - 0.07) / 0.016) < 1 || sq((u - 0.2) / 0.05) + sq((v - 0.105) / 0.02) < 1 || (abs(u + 0.02) < 0.12 && abs(v - 0.145) < 0.006)) dark
                     else sc(208, 192, 178, dim)
                 }
-                else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225) else dark
+                else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225)
+                else if (fr && type == 3 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(130, 255, 160) else dark
             }
             5 -> { // Lucky Crane: white bird, red crown, long neck
                 val head = sq((u + 0.45) / 0.12) + sq((v - 0.17) / 0.09) < 1
@@ -1010,12 +1040,12 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                 val body = sq((u - 0.1) / 0.7) + sq((v - 0.55) / 0.32) < 1
                 val head = sq((u + 0.72) / 0.26) + sq((v - 0.38) / 0.22) < 1
                 val legs = v > 0.78 && (abs(u - 0.65) < 0.09 || abs(u - 0.35) < 0.09 || abs(u + 0.25) < 0.09 || abs(u + 0.5) < 0.09)
-                if (sq((u + 0.82) / 0.07) + sq((v - 0.33) / 0.07) < 1) pack(255, 50, 30) else if (body || head || legs) dark else 0
+                if (sq((u + 0.82) / 0.07) + sq((v - 0.33) / 0.07) < 1) (if (fr) pack(120, 255, 150) else pack(255, 50, 30)) else if (body || head || legs) dark else 0
             }
             else -> { // Smiler: floating dark face, glowing eyes and grin
                 val yc = 0.47 + 0.06 * (1 - sq(u / 0.62))
                 val glow = sq((abs(u) - 0.34) / 0.16) + sq((v - 0.34) / 0.03) < 1 || (abs(u) < 0.62 && abs(v - yc) < 0.022)
-                if (glow) pack(255, 250, 215) else if (sq(u / 0.88) + sq((v - 0.4) / 0.22) < 1) pack(26, 22, 20) else 0
+                if (glow) (if (fr) pack(190, 255, 200) else pack(255, 250, 215)) else if (sq(u / 0.88) + sq((v - 0.4) / 0.22) < 1) pack(26, 22, 20) else 0
             }
         }
     }
@@ -1105,7 +1135,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
             items.add(doubleArrayOf(o[0], o[1], 0.0))
         }
-        for (e in g.entities) items.add(doubleArrayOf(e.x, e.y, e.type.toDouble()))
+        val friendly = Settings.explore
+        for (e in g.entities) items.add(if (friendly && e.type in 1..4) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
         for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) 7.0 else 8.0))
         for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
         items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
@@ -1120,12 +1151,12 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
             val bottom = hz + (full / 2).toInt(); val top = bottom - sh
-            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 7) max(0.85, it) else if (o.size > 3) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
+            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 7) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
             for (col in max(0, sx - sw / 2)..min(W - 1, sx + sw / 2)) {
                 if (ty >= zb[col]) continue
                 val u = (col - sx) / (sw / 2.0)
                 for (row in max(0, top)..min(H - 1, bottom)) {
-                    val c = sprite(type, u, (row - top).toDouble() / sh, dim)
+                    val c = sprite(type, u, (row - top).toDouble() / sh, dim, o.size > 3 && o[3] == 2.0)
                     if (c != 0) px[row * W + col] = c
                 }
             }
