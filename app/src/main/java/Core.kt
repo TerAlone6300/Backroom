@@ -275,9 +275,9 @@ object Settings {
 }
 
 /** Difficulty multipliers (Normal = the original game): entity count, entity speed, how far entities notice you,
- *  sprint drain / refill, spawn distance, catch distance, hunger rate. */
+ *  sprint drain / refill, spawn distance, catch distance, hunger rate, starting rations / almond water. */
 class Diff(val name: String, val blurb: String, val count: Double, val speed: Double, val sight: Double, val drain: Double,
-           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double, val explore: Boolean = false)
+           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double, val kitRations: Int = 2, val kitWater: Int = 1, val explore: Boolean = false)
 /** Explore mode knobs: everything to tune after player feedback is in this one place. */
 object ExploreRules {
     /** false = levels you pass through are NOT remembered (they never reach the unlocked-levels drawer). true = remembered like in the other modes. */
@@ -287,11 +287,11 @@ object ExploreRules {
     // Monsters are friendly in Explore: they wander and tag along at a polite distance, never chase or hurt (see Game.update).
 }
 val DIFFS = listOf(
-    Diff("Easy", "Fewer, slower entities. Longer sprint.", 0.5, 0.8, 0.8, 0.7, 1.25, 1.4, 0.5, 0.6),
-    Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0),
-    Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65, 1.25),
-    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6),
-    Diff("Explore", "Friendly monsters. Safe levels.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.6, explore = true))
+    Diff("Easy", "Fewer, slower entities. Longer sprint.", 0.5, 0.8, 0.8, 0.7, 1.25, 1.4, 0.5, 0.6, 3, 2),
+    Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 2, 1),
+    Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65, 1.25, 1, 1),
+    Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6, 1, 0),
+    Diff("Explore", "Friendly monsters. Safe levels.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.6, 0, 0, explore = true))
 
 class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
                val pitch: Double, val stamina: Double, val playSec: Double,
@@ -405,6 +405,7 @@ fun noclipDest(lv: Int, k: Int): Int {
 }
 
 fun supplyAt(lv: Int, x: Int, y: Int): Int {
+    if (Settings.explore) return 0 // no hunger in Explore, so no supplies
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
     val p = if (lv == 0) 0.12 else if (lv == 12) 0.0014 else 0.0010
@@ -491,7 +492,7 @@ class Game {
         }
     }
 
-    fun newGame(lv: Int = 0) { playSec = 0.0; hunger = 1.0; rations = 0; water = 0; starveT = 0.0; enter(lv) }
+    fun newGame(lv: Int = 0) { playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
 
     fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT)
 
@@ -520,8 +521,8 @@ class Game {
         if (len > 1) { f /= len; s /= len }
         val moving = len > 0.1
         val run = sprint && moving && !exhausted
-        // food: full to empty in about 10 minutes of walking; hungry = slower recovery, starving = slower and, eventually, fatal
-        hunger = max(0.0, hunger - (0.0016 + (if (run) 0.0020 else 0.0)) * dif.hunger * dt)
+        // food: full to empty in about 18 minutes of walking; hungry = slower recovery, starving = slower and, eventually, fatal. Explore has no hunger (stamina still applies).
+        if (dif.explore) hunger = 1.0 else hunger = max(0.0, hunger - (0.0009 + (if (run) 0.0012 else 0.0)) * dif.hunger * dt)
         starveT = if (hunger <= 0.0) starveT + dt else 0.0
         if (starveT > 75) { dead = true; deadT = 0.0; deathMsg = "YOU STARVED"; return }
         if (hunger < 0.2 && !warnHungry) { warnHungry = true; say("YOU ARE HUNGRY  ·  find food") } else if (hunger > 0.4) warnHungry = false
@@ -552,7 +553,7 @@ class Game {
         manilaT = if (inM) manilaT + dt else 0.0
 
         // The Lobby gets to you: stay in its open halls too long and you start seeing things. Almond water or the Manila Room clears your head.
-        if (level == 0) lobbyT = if (inM) max(0.0, lobbyT - dt * 2) else lobbyT + dt
+        if (dif.explore) lobbyT = 0.0 else if (level == 0) lobbyT = if (inM) max(0.0, lobbyT - dt * 2) else lobbyT + dt
         halluc += (((lobbyT - 240) / 300).coerceIn(0.0, 1.0) - halluc) * min(1.0, dt * 0.5)
         if (halluc > 0.08 && !warnHallu) { warnHallu = true; say("YOUR EYES PLAY TRICKS  ·  almond water or the Manila Room helps") } else if (halluc < 0.02) warnHallu = false
         updateGhosts(dt)
@@ -597,13 +598,13 @@ class Game {
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (d < 5) 2.4 else 0.9) * dt)
                 if (r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
-                if (d < 2.2 && !e.gift) { e.gift = true; extra.add(Supply(floor(e.x).toInt(), floor(e.y).toInt(), 1)); scanX = Int.MIN_VALUE; say("A LUCKY CRANE LEFT A RATION") }
+                if (d < 2.2 && !e.gift && !dif.explore) { e.gift = true; extra.add(Supply(floor(e.x).toInt(), floor(e.y).toInt(), 1)); scanX = Int.MIN_VALUE; say("A LUCKY CRANE LEFT A RATION") }
             } else if (e.type == 6) { // Living Pizza: runs away; catch it (sprint!) and it is food
                 if (d < 6) e.dir = atan2(-ey, -ex) + (Math.random() - 0.5) * 0.8 else e.dir += (Math.random() - 0.5) * dt * 2.5
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (d < 6) 2.8 else 0.8) * dt)
                 if (r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
-                if (d < 0.8) { entities.remove(e); hunger = min(1.0, hunger + 0.5); say("YOU CAUGHT A LIVING PIZZA  ·  +FOOD"); continue }
+                if (d < 0.8 && !dif.explore) { entities.remove(e); hunger = min(1.0, hunger + 0.5); say("YOU CAUGHT A LIVING PIZZA  ·  +FOOD"); continue }
             } else { // Smiler: only moves while you are NOT looking at it, drifts through walls
                 var df = (atan2(e.y - y, e.x - x) - a) % (2 * PI)
                 if (df > PI) df -= 2 * PI; if (df < -PI) df += 2 * PI
@@ -618,7 +619,7 @@ class Game {
         // pick up supplies by walking over them (bag holds 9 of each)
         val cx0 = floor(x).toInt(); val cy0 = floor(y).toInt()
         if (cx0 != scanX || cy0 != scanY) rescan(cx0, cy0)
-        for (sp in supplies) if (hypot(sp.x + 0.5 - x, sp.y + 0.5 - y) < 0.75 && (if (sp.type == 1) rations else water) < 9) {
+        for (sp in supplies) if (!dif.explore && hypot(sp.x + 0.5 - x, sp.y + 0.5 - y) < 0.75 && (if (sp.type == 1) rations else water) < 9) {
             taken.add(cellKey(sp.x, sp.y)); if (sp.type == 1) rations++ else water++
             say(if (sp.type == 1) "+1 RATION" else "+1 ALMOND WATER"); scanX = Int.MIN_VALUE
         }

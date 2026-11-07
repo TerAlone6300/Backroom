@@ -169,8 +169,8 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val i = e.actionIndex; val id = e.getPointerId(i); val x = e.getX(i); val y = e.getY(i)
                 if (runHit().contains(x, y)) runOn = !runOn
-                else if (eatHit().contains(x, y)) g.eatReq = true
-                else if (drinkHit().contains(x, y)) g.drinkReq = true
+                else if (!Settings.explore && eatHit().contains(x, y)) g.eatReq = true
+                else if (!Settings.explore && drinkHit().contains(x, y)) g.drinkReq = true
                 else if (optHit().contains(x, y)) openPause()
                 else if (x > width * 0.78f && y < height * 0.28f) g.showMap = !g.showMap
                 else if (x < width / 2f) { if (leftId < 0) { leftId = id; lx0 = x; ly0 = y } }
@@ -400,7 +400,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         c.drawCircle(cx, cy, 28 * dp, pFill)
         pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 2 * dp; pFill.color = Color.argb(180, 255, 255, 255); c.drawCircle(cx, cy, 28 * dp, pFill)
         small(c, if (runOn) "RUN" else "WALK", cx, cy + 4 * dp, 11f, if (runOn) Color.rgb(30, 24, 6) else Color.WHITE, spacing = 0.1f, bold = true)
-        for ((bx, label, cnt) in listOf(Triple(w - 112 * dp, "EAT", g.rations), Triple(w - 168 * dp, "DRINK", g.water))) { // supplies
+        if (!Settings.explore) for ((bx, label, cnt) in listOf(Triple(w - 112 * dp, "EAT", g.rations), Triple(w - 168 * dp, "DRINK", g.water))) { // supplies
             val by = h - 40 * dp; val has = cnt > 0
             pFill.style = Paint.Style.FILL; pFill.color = if (has) Color.argb(150, 40, 30, 10) else Color.argb(70, 0, 0, 0); c.drawCircle(bx, by, 22 * dp, pFill)
             pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 2 * dp; pFill.color = if (has) Color.argb(230, 240, 170, 70) else Color.argb(90, 255, 255, 255); c.drawCircle(bx, by, 22 * dp, pFill)
@@ -425,13 +425,14 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         pText.textSize = 10.5f * dp; pText.color = Color.rgb(225, 215, 180); c.drawText(status, 26 * dp, 50 * dp, pText)
         pText.textSize = 9.5f * dp; pText.color = Color.rgb(160, 155, 130); c.drawText("${fps.toInt()} FPS" + (if (Settings.explore) "  ·  EXPLORE" else ""), 26 * dp, 66 * dp, pText)
 
-        // food bar (blinks red when low)
+        if (!Settings.explore) { // food bar (blinks red when low); Explore has no hunger
         val low = g.hunger < 0.2
         pFill.style = Paint.Style.FILL; pFill.color = Color.argb(120, 0, 0, 0); c.drawRoundRect(RectF(12 * dp, 82 * dp, 230 * dp, 98 * dp), 6 * dp, 6 * dp, pFill)
         small(c, "FOOD", 20 * dp, 93.5f * dp, 8.5f, Color.rgb(225, 215, 180), Paint.Align.LEFT, 0.2f, true)
         pFill.color = Color.argb(110, 255, 255, 255); c.drawRect(58 * dp, 87 * dp, 222 * dp, 93 * dp, pFill)
         pFill.color = if (low && (System.currentTimeMillis() / 300) % 2 == 0L) Color.rgb(235, 70, 55) else if (low) Color.rgb(210, 90, 60) else Color.rgb(240, 170, 70)
         c.drawRect(58 * dp, 87 * dp, 58 * dp + 164 * dp * g.hunger.toFloat(), 93 * dp, pFill)
+        }
         if (g.noticeT > 0) small(c, g.notice, w / 2, h * 0.74f, 12f, Color.argb((min(1.0, g.noticeT) * 255).toInt(), 255, 236, 180), spacing = 0.08f, bold = true)
 
         if (leftId >= 0) { // floating joystick
