@@ -2,11 +2,6 @@ package com.backrooms.game
 // Renderer.kt - the raycasting renderer. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-private val FLICKER = arrayOf(doubleArrayOf(0.12, 0.20, 0.27), doubleArrayOf(0.20, 0.28, 0.40), doubleArrayOf(0.15, 0.25, 0.32),
-    doubleArrayOf(0.25, 0.35, 0.45), doubleArrayOf(0.15, 0.22, 0.30), doubleArrayOf(0.18, 0.30, 0.38), doubleArrayOf(0.02, 0.05, 0.05),
-    doubleArrayOf(0.02, 0.04, 0.95), doubleArrayOf(0.0, 0.02, 0.03), doubleArrayOf(0.10, 0.20, 0.28), doubleArrayOf(0.0, 0.05, 0.08),
-    doubleArrayOf(0.08, 0.16, 0.20), doubleArrayOf(0.02, 0.05, 0.06))
-
 // ---------- Renderer: textured raycaster, pooled lighting, fog, look up/down, entities ----------
 private val SINT = DoubleArray(4096) { sin(it * 2 * PI / 4096) }
 /** Table sine for cosmetic shimmer (water); accuracy does not matter there, speed does. */
@@ -144,7 +139,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private fun mul2(c: Int, kr: Int, kg: Int, kb: Int) = pack((((c shr 16) and 255) * kr) shr 16, (((c shr 8) and 255) * kg) shr 16, ((c and 255) * kb) shr 16)
 
     private fun flick(lv: Int, kx: Int, ky: Int, t: Double): Double {
-        val v = h(kx, ky, 9 + lv * 13); val th = FLICKER[lv]
+        val v = h(kx, ky, 9 + lv * 13); val th = LEVEL_SPECS[lv].flicker
         return when {
             v < th[0] * 0.4 -> if (sin(t * (6 + v * 20) + v * 50) > 0.5) 0.45 else 1.0 // broken: few, slow, shallow stutter
             v < th[1] -> 0.96 + 0.04 * sin(t * 40)                                    // humming (barely visible)

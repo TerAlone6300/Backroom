@@ -31,7 +31,7 @@ class Ghost(var x: Double, var y: Double, val type: Int, var life: Double)
 
 /** Where noclip wall `k` of level `lv` leads. In Explore mode, most of the time (ExploreRules.SAFE_NOCLIP_CHANCE) a Safe & Secure level instead. */
 fun noclipDest(lv: Int, k: Int): Int {
-    val fixed = NOCLIP_TARGETS[lv][k]
+    val fixed = LEVEL_SPECS[lv].noclip[k]
     if (!Settings.explore || Math.random() >= ExploreRules.SAFE_NOCLIP_CHANCE) return fixed
     val safe = LEVELS.indices.filter { LEVELS[it].safe && it != lv }
     return if (safe.isEmpty()) fixed else safe[(Math.random() * safe.size).toInt()]

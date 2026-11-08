@@ -40,7 +40,7 @@ jobs:
           echo "$HOME/kotlinc/bin" >> "$GITHUB_PATH"
 
       - name: Build backrooms.jar
-        run: kotlinc app/src/main/java/core/*.kt desktop/Desktop.kt -include-runtime -d backrooms.jar
+        run: kotlinc app/src/main/java/core/*.kt app/src/main/java/core/levels/*.kt desktop/Desktop.kt -include-runtime -d backrooms.jar
 
       - name: Decode keystore
         if: ${{ env.JKS_BASE64 != '' }}

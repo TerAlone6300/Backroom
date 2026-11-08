@@ -1,6 +1,20 @@
 package com.backrooms.game
-// City.kt - Level 11: the open night city. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
+// L12_TheCity.kt - Level 12: The City That Never Sleeps. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
+
+/** Internal id 12 = Backrooms Level 11, The City That Never Sleeps. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+object Level12TheCity : LevelSpec {
+    override val def = LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "SMILERS · HOUNDS · FACELINGS", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
+        calm = 0.45, cast = intArrayOf(4, 1, 4, 2, 1, 4, 1, 2), safe = true, lamp0 = 0.5) // 3 Facelings, 3 Hounds, 2 Smilers (scaled by difficulty)
+    override val noclip = intArrayOf(1, 4, 6, 10)
+    override val flicker = doubleArrayOf(0.02, 0.05, 0.06)
+    private val SPEC = TexSpec(intArrayOf(104, 100, 114), intArrayOf(58, 58, 64), intArrayOf(16, 20, 40), intArrayOf(255, 236, 170), 0, 0)
+
+    override fun wall(x: Int, y: Int): Boolean = City.wall(x, y)
+    override fun keepsMaze(x: Int, y: Int) = true // the city has its own long streets
+
+    override fun textures(t: TexSet) = t.fromSpec(12, SPEC)
+}
 
 // ---------- Level 11: the city ----------
 /** An open night-time city, no ceiling. 16x16 blocks, 6-wide streets (sidewalk, four lanes, sidewalk) with open crossings.

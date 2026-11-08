@@ -2,73 +2,9 @@ package com.backrooms.game
 // World.kt - maze generators, wall lookup (cached), noclip walls, collision and line of sight. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-// ---------- Worlds: deterministic per level, so every device sees the same maze ----------
-private fun wall0(x: Int, y: Int): Boolean { // The Lobby: 6x6 rooms, 2-wide doors, pillars
-    if (Manila.inClear(x, y)) return Manila.wall(x, y)
-    val bx = Math.floorDiv(x, 6); val by = Math.floorDiv(y, 6)
-    val lx = Math.floorMod(x, 6); val ly = Math.floorMod(y, 6)
-    if (lx == 0 && ly == 0) return true
-    val dv = 1 + (h(bx, by, 2) * 3).toInt(); val dh = 1 + (h(bx, by, 4) * 3).toInt()
-    if (lx == 0 && h(bx, by, 1) < 0.7 && ly !in dv..dv + 1) return true
-    if (ly == 0 && h(bx, by, 3) < 0.7 && lx !in dh..dh + 1) return true
-    return false
-}
-
-private fun wall1(x: Int, y: Int): Boolean { // Habitable Zone: huge hall, pillar grid, long concrete walls
-    if (Math.floorMod(x, 5) == 0 && Math.floorMod(y, 5) == 0) return true
-    val bx = Math.floorDiv(x, 10); val by = Math.floorDiv(y, 10)
-    val lx = Math.floorMod(x, 10); val ly = Math.floorMod(y, 10)
-    val gv = 1 + (h(bx, by, 12) * 5).toInt(); val gh = 1 + (h(bx, by, 14) * 5).toInt()
-    if (lx == 0 && h(bx, by, 11) < 0.45 && ly !in gv..gv + 3) return true
-    if (ly == 0 && h(bx, by, 13) < 0.45 && lx !in gh..gh + 3) return true
-    return false
-}
-
-private fun wall2(x: Int, y: Int): Boolean { // Pipe Dreams: tight 2-wide tunnels, 1-cell doors
-    val bx = Math.floorDiv(x, 3); val by = Math.floorDiv(y, 3)
-    val lx = Math.floorMod(x, 3); val ly = Math.floorMod(y, 3)
-    if (lx == 0 && ly == 0) return true
-    if (lx == 0 && h(bx, by, 21) < 0.78 && ly != 1 + (h(bx, by, 22) * 2).toInt()) return true
-    if (ly == 0 && h(bx, by, 23) < 0.78 && lx != 1 + (h(bx, by, 24) * 2).toInt()) return true
-    return false
-}
-
-private fun wall3(x: Int, y: Int): Boolean { // Electrical Station: 3x3 machines in a grid of 2-wide streets
-    val bx = Math.floorDiv(x, 5); val by = Math.floorDiv(y, 5)
-    return Math.floorMod(x, 5) in 1..3 && Math.floorMod(y, 5) in 1..3 && h(bx, by, 31) < 0.85
-}
-
-private fun wall4(x: Int, y: Int): Boolean { // Abandoned Office: cubicle partitions with 1-cell openings
-    val bx = Math.floorDiv(x, 4); val by = Math.floorDiv(y, 4)
-    val lx = Math.floorMod(x, 4); val ly = Math.floorMod(y, 4)
-    if (lx == 0 && ly == 0) return true
-    if (lx == 0 && h(bx, by, 41) < 0.65 && ly != 3) return true
-    if (ly == 0 && h(bx, by, 43) < 0.65 && lx != 3) return true
-    return false
-}
-
-private fun wall5(x: Int, y: Int): Boolean { // Terror Hotel: long corridors, rooms with a door each
-    val bx = Math.floorDiv(x, 8)
-    val lx = Math.floorMod(x, 8); val ly = Math.floorMod(y, 7)
-    if (Math.floorMod(bx, 3) == 0 && lx < 2) return false // vertical corridor
-    if (ly < 2) return false                               // horizontal corridor
-    if (ly == 2) return lx !in 4..5                        // front wall with a door
-    if (ly == 6) return true                               // back wall
-    return lx == 2                                         // partition between rooms
-}
-
-private fun wall6(x: Int, y: Int): Boolean { // Poolrooms: bright halls, columns, wide archways
-    if (Math.floorMod(x, 7) == 0 && Math.floorMod(y, 7) == 0) return true
-    val bx = Math.floorDiv(x, 14); val by = Math.floorDiv(y, 14)
-    val lx = Math.floorMod(x, 14); val ly = Math.floorMod(y, 14)
-    val gv = 2 + (h(bx, by, 62) * 4).toInt(); val gh = 2 + (h(bx, by, 64) * 4).toInt()
-    if (lx == 0 && h(bx, by, 61) < 0.6 && ly !in gv..gv + 5) return true
-    if (ly == 0 && h(bx, by, 63) < 0.6 && lx !in gh..gh + 5) return true
-    return false
-}
-
+// ---------- Worlds: deterministic per level (the mazes themselves are in core/levels), so every device sees the same maze ----------
 /** Generic room grid: blocks of b cells, walls with probability p, doors dw cells wide. */
-private fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
+fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     val bx = Math.floorDiv(x, b); val by = Math.floorDiv(y, b)
     val lx = Math.floorMod(x, b); val ly = Math.floorMod(y, b)
     if (lx == 0 && ly == 0) return true
@@ -77,12 +13,6 @@ private fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     if (lx == 0 && h(bx, by, s) < p && ly !in gv until gv + dw) return true
     if (ly == 0 && h(bx, by, s + 2) < p && lx !in gh until gh + dw) return true
     return false
-}
-
-private fun baseWall(lv: Int, x: Int, y: Int) = when (lv) {
-    0 -> wall0(x, y); 1 -> wall1(x, y); 2 -> wall2(x, y); 3 -> wall3(x, y); 4 -> wall4(x, y); 5 -> wall5(x, y); 6 -> wall6(x, y)
-    7 -> grid(x, y, 5, 110, 0.8, 2); 8 -> grid(x, y, 8, 120, 0.6, 3); 9 -> grid(x, y, 7, 130, 0.7, 2)
-    10 -> wall5(x + 37, y + 11); 12 -> City.wall(x, y); else -> grid(x, y, 4, 140, 0.9, 1)
 }
 
 // Every so often a long straight hallway (3 wide, 36-60 cells) is cut through the maze. One candidate per 96x96 sector.
@@ -103,8 +33,9 @@ private fun hallway(lv: Int, x: Int, y: Int): Int {
 }
 
 private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
-    if (lv == 12 || (lv == 0 && Manila.inClear(x, y))) return baseWall(lv, x, y) // the city has its own long streets; the Manila Room stays untouched
-    return when (hallway(lv, x, y)) { 1 -> true; 2 -> false; else -> baseWall(lv, x, y) }
+    val sp = LEVEL_SPECS[lv]
+    if (sp.keepsMaze(x, y)) return sp.wall(x, y)
+    return when (hallway(lv, x, y)) { 1 -> true; 2 -> false; else -> sp.wall(x, y) }
 }
 
 // The maze is a pure function of (level, x, y) but costs several hashes per cell, so it is cached in 32x32 chunks.
@@ -129,11 +60,8 @@ private fun chunk(lv: Int, cx: Int, cy: Int): Chunk {
 
 fun isWall(lv: Int, x: Int, y: Int): Boolean = chunk(lv, x shr 5, y shr 5).w[((y and 31) shl 5) or (x and 31)]
 
-/** Each level has exactly 4 not-quite-solid walls at fixed spots; each leads to a fixed level. */
-val NOCLIP_TARGETS = listOf(
-    intArrayOf(1, 7, 11, 5), intArrayOf(2, 0, 9, 12), intArrayOf(3, 1, 10, 4), intArrayOf(4, 2, 11, 12), intArrayOf(5, 3, 0, 12),
-    intArrayOf(6, 4, 10, 2), intArrayOf(8, 5, 0, 12), intArrayOf(0, 1, 9, 12), intArrayOf(6, 0, 10, 4), intArrayOf(0, 2, 11, 12),
-    intArrayOf(2, 5, 8, 12), intArrayOf(3, 5, 8, 12), intArrayOf(1, 4, 6, 10))
+/** Each level has exactly 4 not-quite-solid walls at fixed spots; each leads to a fixed level (LevelSpec.noclip). */
+val NOCLIP_TARGETS: List<IntArray> get() = LEVEL_SPECS.map { it.noclip }
 
 val NOCLIPS: List<List<IntArray>> by lazy {
     LEVELS.indices.map { lv ->
