@@ -367,7 +367,7 @@ fun los(lv: Int, x0: Double, y0: Double, x1: Double, y1: Double): Boolean {
 
 // ---------- Entities & player state ----------
 /** type 1 = Hound (Level 1), type 2 = Smiler (Level 2) */
-/** Level 11 Effect and the city's entities: everything to tune in one place. */
+/** Level 11 Effect and the city's entities: everything to tune in one place. (Provocation is switched off for now, see Game.update.) */
 object CityRules {
     /** A Faceling follows a person for this long (seconds of actually following), then loses interest. */
     const val FACELING_FOLLOW_SECONDS = 600.0
@@ -375,7 +375,7 @@ object CityRules {
     const val HOUND_GUIDE_RANGE = 16.0
     /** A guiding Hound waits for you when you fall this far behind (cells). */
     const val HOUND_WAIT_DISTANCE = 8.0
-    /** Seconds of crowding (or sprinting right past a Hound) before the Level 11 Effect wears off for that entity. */
+    /** Seconds of crowding (or sprinting right past a Hound) before the Level 11 Effect wears off for that entity. Unused while provocation is switched off. */
     const val PROVOKE_SECONDS = 2.5
 }
 
@@ -493,12 +493,12 @@ class Game {
         }
     }
 
-    /** Level 11: a Smiler waits in the dark of a hollow building (never a stocked one, those are for the Hounds' guests). */
+    /** Level 11: a Smiler waits in a dark building (hollow, no lamps, never a stocked one: those are for the Hounds' guests). */
     private fun spawnInBuilding(): Entity? {
         for (i in 0 until 300) {
             val cx = floor(x + (Math.random() - 0.5) * 90).toInt(); val cy = floor(y + (Math.random() - 0.5) * 90).toInt()
             val f = City.hollowAt(cx, cy) ?: continue
-            if (City.stocked(cx shr 4, cy shr 4) || hypot(cx + 0.5 - x, cy + 0.5 - y) < 14) continue
+            if (!City.dark(cx shr 4, cy shr 4) || hypot(cx + 0.5 - x, cy + 0.5 - y) < 14) continue
             return Entity(cx + 0.5, cy + 0.5, 2).also { it.home = f }
         }
         return null
@@ -641,12 +641,14 @@ class Game {
                 e.x = r.first; e.y = r.second; e.chase = false; e.passive = true
                 continue
             }
-            // Level 11 Effect: Hounds and Facelings are calm until provoked (crowding them, or sprinting right past a Hound). Smilers are not affected.
-            if (cityFx && (e.type == 1 || e.type == 4) && !e.provoked) {
-                val crowd = d < 1.4 || (e.type == 1 && run && d < 6)
-                e.irr = if (crowd) e.irr + dt else max(0.0, e.irr - dt * 0.3)
-                if (e.irr > CityRules.PROVOKE_SECONDS) { e.provoked = true; say("IT DID NOT LIKE THAT") }
-                else { e.passive = true; calmBehaviour(e, d, ex, ey, dt); continue }
+            // Level 11 Effect: Hounds and Facelings stay calm. Smilers are not affected.
+            // Provocation is switched off for now (they never turn hostile). To bring it back: add "&& !e.provoked" to the condition,
+            // uncomment the three lines, and wrap the last line in "else { ... }" so a provoked entity falls through to the hostile code below.
+            if (cityFx && (e.type == 1 || e.type == 4)) {
+                // val crowd = d < 1.4 || (e.type == 1 && run && d < 6)   // crowding it, or sprinting right past a Hound
+                // e.irr = if (crowd) e.irr + dt else max(0.0, e.irr - dt * 0.3)
+                // if (e.irr > CityRules.PROVOKE_SECONDS) { e.provoked = true; say("IT DID NOT LIKE THAT") }
+                e.passive = true; calmBehaviour(e, d, ex, ey, dt); continue
             }
             e.passive = false
             val smilerHome = e.home
@@ -987,20 +989,38 @@ object City {
         return if (height(x, y) >= 7) 1 else if (h(bx, by, 161) < 0.5) 0 else 2
     }
 
-    /** Footprint [x0, y0, x1, y1] (cell coordinates, inclusive) of the hollow building in block (bx, by), or null. */
-    private fun foot(bx: Int, by: Int): IntArray? {
-        val k = h(bx, by, 150); if (k < 0.50) return null
-        val sx = 6 + (h(bx, by, 151) * 5).toInt(); val sy = 6 + (h(bx, by, 152) * 5).toInt()
-        val x0 = bx * 16 + 6 + ((10 - sx) * h(bx, by, 153)).toInt(); val y0 = by * 16 + 6 + ((10 - sy) * h(bx, by, 154)).toInt()
-        return intArrayOf(x0, y0, x0 + sx - 1, y0 + sy - 1)
+    /** Per-block facts, cached: footprint of the hollow building [x0, y0, x1, y1] (or null), whether it is stocked, whether it is dark. */
+    private class BlockInfo(val bx: Int, val by: Int, val foot: IntArray?, val stocked: Boolean, val dark: Boolean)
+    private val blocks = java.util.concurrent.atomic.AtomicReferenceArray<BlockInfo?>(512)
+    private fun info(bx: Int, by: Int): BlockInfo {
+        val i = ((bx * 73856093) xor (by * 19349663)) and 511
+        val c = blocks.get(i); if (c != null && c.bx == bx && c.by == by) return c
+        var f: IntArray? = null
+        if (h(bx, by, 150) >= 0.50) {
+            val sx = 6 + (h(bx, by, 151) * 5).toInt(); val sy = 6 + (h(bx, by, 152) * 5).toInt()
+            val x0 = bx * 16 + 6 + ((10 - sx) * h(bx, by, 153)).toInt(); val y0 = by * 16 + 6 + ((10 - sy) * h(bx, by, 154)).toInt()
+            f = intArrayOf(x0, y0, x0 + sx - 1, y0 + sy - 1)
+        }
+        val st = f != null && h(bx, by, 190) < 0.35
+        val n = BlockInfo(bx, by, f, st, f != null && !st && h(bx, by, 195) < 0.6) // dark: hollow, not stocked, about 60% of those
+        blocks.set(i, n); return n
     }
+    private fun foot(bx: Int, by: Int): IntArray? = info(bx, by).foot
     /** The footprint of the hollow building whose open floor contains cell (x, y), else null. */
     fun hollowAt(x: Int, y: Int): IntArray? {
         val f = foot(x shr 4, y shr 4) ?: return null
         return if (x in f[0] + 1..f[2] - 1 && y in f[1] + 1..f[3] - 1 && !wall(x, y)) f else null
     }
     /** Some hollow buildings are stocked: supplies all over the floor. This is where Hounds lead you. */
-    fun stocked(bx: Int, by: Int) = foot(bx, by) != null && h(bx, by, 190) < 0.35
+    fun stocked(bx: Int, by: Int) = info(bx, by).stocked
+    /** Dark buildings: no lamps inside, the Smilers' homes. */
+    fun dark(bx: Int, by: Int) = info(bx, by).dark
+    /** True for an open floor cell inside a dark building (what the renderer switches the lights off for). */
+    fun darkCell(x: Int, y: Int): Boolean {
+        if ((x and 15) < 6 || (y and 15) < 6) return false
+        val i = info(x shr 4, y shr 4); val f = i.foot ?: return false
+        return i.dark && x in f[0] + 1..f[2] - 1 && y in f[1] + 1..f[3] - 1
+    }
     fun cacheCell(x: Int, y: Int) = hollowAt(x, y) != null && stocked(x shr 4, y shr 4)
     /** An open floor cell inside the nearest stocked building within 3 blocks of (wx, wy), or null. */
     fun stockedNear(wx: Double, wy: Double): IntArray? {
@@ -1225,7 +1245,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                 val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
                 val ix = floor(wx).toInt(); val iy = floor(wy).toInt()
                 val tx = ((wx - ix) * 64).toInt() and 63; val ty = ((wy - iy) * 64).toInt() and 63
-                val lit = mul(City.ground(wx, wy, ix, iy, ts.floor[ty * 64 + tx]), lightAt(d, lp, wx, wy, t) * gl * fog * 0.95, tn)
+                val lit = mul(City.ground(wx, wy, ix, iy, ts.floor[ty * 64 + tx]), lightAt(d, lp, wx, wy, t) * gl * fog * 0.95 * (if (City.darkCell(ix, iy)) 0.12 else 1.0), tn)
                 px[yy * W + xx] = if (ha > 0) blend(lit, HZC, ha) else lit
             }
         }
@@ -1257,8 +1277,10 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             var tx = (((if (sd == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
             if ((sd == 0 && rx > 0) || (sd == 1 && ry < 0)) tx = 63 - tx
             val fogF = 1.0 / (1 + pp * pp * fk); val sideF = if (sd == 1) 0.82 else 1.0
-            val kk = (lightAt(d, lp, hx, hy, t) * gl * fogF * sideF * 256).toInt().coerceIn(0, 640)
-            val ke = (256 * (0.45 + 0.55 * fogF) * sideF).toInt() // lit windows glow: they dim with distance but not with the lamps
+            // the face is inside a dark building when the cell the ray came from is: no lamps, and the windows are dead too
+            val dk = City.darkCell(if (sd == 0) mx - (if (rx < 0) -1 else 1) else mx, if (sd == 0) my else my - (if (ry < 0) -1 else 1))
+            val kk = (lightAt(d, lp, hx, hy, t) * gl * fogF * sideF * (if (dk) 0.12 else 1.0) * 256).toInt().coerceIn(0, 640)
+            val ke = if (dk) kk else (256 * (0.45 + 0.55 * fogF) * sideF).toInt() // lit windows glow: they dim with distance but not with the lamps
             val kr = kk * tn[0]; val kg = kk * tn[1]; val kb = kk * tn[2]; val er = ke * tn[0]; val eg = ke * tn[1]; val eb = ke * tn[2]
             val ha = ((1.0 - 1.0 / (1 + pp * pp * 0.0007 * Settings.fogScale)) * 256).toInt()
             val lh = (H * vs / pp).toInt().coerceAtLeast(1)
