@@ -18,7 +18,7 @@ fun h(x: Int, y: Int, s: Int): Double {
 
 // ---------- Levels ----------
 /** eType: 0 none, 1 Hound (chases on sight), 2 Smiler (moves when unseen), 3 Skin-Stealer (looks like a player, closes in),
- *  4 Faceling (ignores you unless crowded), 5 Lucky Crane (harmless, shy), 6 Living Pizza (harmless, runs away).
+ *  4 Faceling (a person with no face; in Level 11 it follows you around).
  *  lantern: personal light that follows you. isolated: players cannot see each other on this level. */
 class LevelDef(val id: Int, val label: String, val name: String, val blurb: String, val entities: String, val eType: Int, val eCount: Int,
                val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
@@ -41,8 +41,8 @@ val LEVELS = listOf(
     LevelDef(9, "LEVEL 139", "GRAYSCALE HALLS", "Colourless concrete. The paintings look back.", "NONE", 0, 0, 4, 0.14, 0.38, 0.016, intArrayOf(236, 236, 236), 0xBEBEBE, safe = true),
     LevelDef(10, "LEVEL 182", "CITY OF DUSK", "A sunset that never sets over empty concrete rooms.", "NONE", 0, 0, 4, 0.22, 0.18, 0.014, intArrayOf(256, 200, 150), 0xFF9A5A, safe = true),
     LevelDef(11, "LEVEL 201", "THE THRESHOLD", "A transit between depths. No one else can reach you here.", "NONE", 0, 0, 4, 0.25, 0.30, 0.016, intArrayOf(236, 242, 256), 0xC8D0E8, isolated = true, safe = true),
-    LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "FACELINGS · HOUNDS · CRANES", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
-        calm = 0.45, cast = intArrayOf(4, 5, 1, 4, 6, 5, 1, 4), safe = true, lamp0 = 0.5) // 3 Facelings, 2 Lucky Cranes, 2 Hounds, 1 Living Pizza (scaled by difficulty)
+    LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "SMILERS · HOUNDS · FACELINGS", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
+        calm = 0.45, cast = intArrayOf(4, 1, 4, 2, 1, 4, 1, 2), safe = true, lamp0 = 0.5) // 3 Facelings, 3 Hounds, 2 Smilers (scaled by difficulty)
 )
 
 /** The Manila Room: the one and only room of Level 0 where isolation does not apply. */
@@ -367,8 +367,26 @@ fun los(lv: Int, x0: Double, y0: Double, x1: Double, y1: Double): Boolean {
 
 // ---------- Entities & player state ----------
 /** type 1 = Hound (Level 1), type 2 = Smiler (Level 2) */
+/** Level 11 Effect and the city's entities: everything to tune in one place. */
+object CityRules {
+    /** A Faceling follows a person for this long (seconds of actually following), then loses interest. */
+    const val FACELING_FOLLOW_SECONDS = 600.0
+    /** Hounds start leading you to a stocked building when you are this close (cells). */
+    const val HOUND_GUIDE_RANGE = 16.0
+    /** A guiding Hound waits for you when you fall this far behind (cells). */
+    const val HOUND_WAIT_DISTANCE = 8.0
+    /** Seconds of crowding (or sprinting right past a Hound) before the Level 11 Effect wears off for that entity. */
+    const val PROVOKE_SECONDS = 2.5
+}
+
 class Entity(var x: Double, var y: Double, val type: Int) {
-    var dir = Math.random() * 6.283; var chase = false; var gift = false
+    var dir = Math.random() * 6.283; var chase = false
+    var home: IntArray? = null                 // Smiler in Level 11: footprint of its building [x0, y0, x1, y1]
+    var provoked = false; var irr = 0.0        // Level 11 Effect lost / how close it is to being lost
+    @Volatile var passive = false              // calm or friendly right now (drawn with the friendly look)
+    var followT = 0.0                          // Faceling: seconds spent following you
+    var gx = 0; var gy = 0; var hasGoal = false; var goalT = 0.0 // Hound: stocked building it leads you to
+    var wx = 0; var wy = 0; var hasWp = false; var routeT = 0.0   // next cell on the way there
 }
 
 /** Supplies: 1 = ration (food), 2 = almond water (clears hallucinations, a little food). */
@@ -389,7 +407,8 @@ fun supplyAt(lv: Int, x: Int, y: Int): Int {
     if (Settings.explore) return 0 // no hunger in Explore, so no supplies
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
-    val p = if (lv == 0) 0.12 else if (lv == 12) 0.0014 else 0.0010
+    if (lv == 12 && City.cacheCell(x, y)) return if (h(x, y, 191) >= 0.22) 0 else if (h(x, y, 881) < 0.4) 2 else 1 // stocked building
+    val p = if (lv == 0) 0.12 else if (lv == 12) 0.0006 else 0.0010
     if (h(x, y, 880 + lv) >= p) return 0
     return if (h(x, y, 881) < 0.4) 2 else 1
 }
@@ -413,7 +432,7 @@ class Game {
     @Volatile var eatReq = false; @Volatile var drinkReq = false // set by the UI threads, handled in update()
     var lobbyT = 0.0; @Volatile var halluc = 0.0; val ghosts = CopyOnWriteArrayList<Ghost>(); private var ghostCd = 4.0
     @Volatile var supplies: List<Supply> = emptyList()
-    private val taken = HashSet<Long>(); private val extra = ArrayList<Supply>()
+    private val taken = HashSet<Long>()
     private var scanX = Int.MIN_VALUE; private var scanY = 0
     private var warnHungry = false; private var warnHallu = false
     var notice = ""; @Volatile var noticeT = 0.0; var deathMsg = "YOU WERE CAUGHT"
@@ -423,13 +442,12 @@ class Game {
     /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
     private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
-    private fun resetLevelState() { taken.clear(); extra.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false }
+    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
     private fun rescan(cx: Int, cy: Int) {
         scanX = cx; scanY = cy
         val out = ArrayList<Supply>()
         for (dy in -13..13) for (dx in -13..13) { val t = supplyAt(level, cx + dx, cy + dy); if (t != 0 && cellKey(cx + dx, cy + dy) !in taken) out.add(Supply(cx + dx, cy + dy, t)) }
-        for (e in extra) if (cellKey(e.x, e.y) !in taken && abs(e.x - cx) <= 13 && abs(e.y - cy) <= 13) out.add(e)
         supplies = out
     }
 
@@ -468,10 +486,81 @@ class Game {
         val df = DIFFS[Settings.diff]; val ld = LEVELS[level]; val cast = ld.cast
         val n = if (cast.isEmpty()) ld.eCount else cast.size // entity-free levels stay entity-free
         repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) { i ->
+            if (level == 12 && !cast.isEmpty() && cast[i % cast.size] == 2) { val s = spawnInBuilding(); if (s != null) { entities.add(s); return@repeat } }
             val ang = Math.random() * 6.283; val d = (11 + Math.random() * 8) * df.spawn
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
             entities.add(Entity(q.first, q.second, if (cast.isEmpty()) ld.eType else cast[i % cast.size]))
         }
+    }
+
+    /** Level 11: a Smiler waits in the dark of a hollow building (never a stocked one, those are for the Hounds' guests). */
+    private fun spawnInBuilding(): Entity? {
+        for (i in 0 until 300) {
+            val cx = floor(x + (Math.random() - 0.5) * 90).toInt(); val cy = floor(y + (Math.random() - 0.5) * 90).toInt()
+            val f = City.hollowAt(cx, cy) ?: continue
+            if (City.stocked(cx shr 4, cy shr 4) || hypot(cx + 0.5 - x, cy + 0.5 - y) < 14) continue
+            return Entity(cx + 0.5, cy + 0.5, 2).also { it.home = f }
+        }
+        return null
+    }
+
+    // shortest route over open cells (4-neighbour BFS, 97x97 window around the start): the next cell to walk to, or null
+    private val bfsPrev = IntArray(97 * 97); private val bfsQ = IntArray(97 * 97)
+    private val bdx = intArrayOf(1, -1, 0, 0); private val bdy = intArrayOf(0, 0, 1, -1)
+    private fun route(sx: Int, sy: Int, gx: Int, gy: Int): IntArray? {
+        val r = 48; val sz = 97
+        if (abs(gx - sx) > r || abs(gy - sy) > r) return null
+        java.util.Arrays.fill(bfsPrev, -2)
+        val ox = sx - r; val oy = sy - r; val start = r * sz + r; val goal = (gy - oy) * sz + (gx - ox)
+        var qh = 0; var qt = 0
+        bfsPrev[start] = -1; bfsQ[qt++] = start
+        while (qh < qt) {
+            val c = bfsQ[qh++]; if (c == goal) break
+            val cx = c % sz; val cy = c / sz
+            for (k in 0..3) {
+                val nx = cx + bdx[k]; val ny = cy + bdy[k]
+                if (nx < 0 || ny < 0 || nx >= sz || ny >= sz) continue
+                val ni = ny * sz + nx
+                if (bfsPrev[ni] != -2 || isWall(level, nx + ox, ny + oy)) continue
+                bfsPrev[ni] = c; bfsQ[qt++] = ni
+            }
+        }
+        if (bfsPrev[goal] == -2) return null
+        var c = goal
+        while (bfsPrev[c] != start && bfsPrev[c] != -1) c = bfsPrev[c]
+        return intArrayOf(c % sz + ox, c / sz + oy)
+    }
+
+    /** Level 11 Effect, for Hounds and Facelings that have not been provoked. Returns true when it handled the entity. */
+    private fun calmBehaviour(e: Entity, d: Double, ex: Double, ey: Double, dt: Double): Boolean {
+        var speed = 0.0
+        if (e.type == 4) { // Faceling: walks up to you and tags along; after a while it loses interest
+            if (e.followT < CityRules.FACELING_FOLLOW_SECONDS && d < 18) {
+                e.followT += dt; e.dir = atan2(ey, ex)
+                if (d > 2.6) speed = if (d > 6) 2.6 else 2.0
+            } else {
+                e.dir += (Math.random() - 0.5) * dt * 2; speed = 0.6
+                if (e.followT >= CityRules.FACELING_FOLLOW_SECONDS && d < 6) { e.dir = atan2(-ey, -ex); speed = 1.0 }
+            }
+        } else { // Hound: leads you to the nearest stocked building, waits when you fall behind
+            if (d < CityRules.HOUND_GUIDE_RANGE) {
+                e.goalT -= dt
+                if (e.goalT <= 0) { e.goalT = 3.0; val t = City.stockedNear(e.x, e.y); e.hasGoal = t != null; if (t != null) { e.gx = t[0]; e.gy = t[1] } }
+                if (!e.hasGoal) { e.dir += (Math.random() - 0.5) * dt * 3; speed = 0.8 }
+                else if (hypot(e.gx + 0.5 - e.x, e.gy + 0.5 - e.y) < 2.5 || d > CityRules.HOUND_WAIT_DISTANCE) e.dir = atan2(ey, ex) // arrived, or waiting for you
+                else {
+                    e.routeT -= dt
+                    if (e.routeT <= 0 || !e.hasWp) { e.routeT = 0.8; val w = route(floor(e.x).toInt(), floor(e.y).toInt(), e.gx, e.gy); e.hasWp = w != null; if (w != null) { e.wx = w[0]; e.wy = w[1] } }
+                    if (e.hasWp) { e.dir = atan2(e.wy + 0.5 - e.y, e.wx + 0.5 - e.x); speed = 1.9 }
+                }
+            } else { e.dir += (Math.random() - 0.5) * dt * 3; speed = 0.8 }
+        }
+        if (speed > 0) {
+            val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), speed * dt)
+            if (r.first == e.x && r.second == e.y) e.dir += 1.6
+            e.x = r.first; e.y = r.second
+        }
+        return true
     }
 
     fun newGame(lv: Int = 0) { playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
@@ -541,7 +630,7 @@ class Game {
         updateGhosts(dt)
 
         var dg = 0.0; var pr = 0.0
-        val calm = LEVELS[level].calm
+        val cityFx = LEVELS[level].calm < 1.0 // Level 11 Effect
         for (e in entities) {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
             if (dif.explore && e.type in 1..4) { // Explore: every monster is friendly. It wanders, and tags along at a polite distance
@@ -549,11 +638,21 @@ class Game {
                 if (follow) e.dir = atan2(ey, ex) + sin(levelT * 0.7 + e.x) * 0.5 else e.dir += (Math.random() - 0.5) * dt * 2
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (follow) 1.4 else 0.6) * dt)
                 if (r.first == e.x && r.second == e.y) e.dir += 1.6
-                e.x = r.first; e.y = r.second; e.chase = false
+                e.x = r.first; e.y = r.second; e.chase = false; e.passive = true
                 continue
             }
-            if (e.type != 5 && e.type != 6) pr = max(pr, 1 - d / 12)
-            val sight = dif.sight * (if (calm < 1.0 && !(run && d < 12)) calm else 1.0) // Level 11 Effect: hostiles mostly ignore you, unless you run past them
+            // Level 11 Effect: Hounds and Facelings are calm until provoked (crowding them, or sprinting right past a Hound). Smilers are not affected.
+            if (cityFx && (e.type == 1 || e.type == 4) && !e.provoked) {
+                val crowd = d < 1.4 || (e.type == 1 && run && d < 6)
+                e.irr = if (crowd) e.irr + dt else max(0.0, e.irr - dt * 0.3)
+                if (e.irr > CityRules.PROVOKE_SECONDS) { e.provoked = true; say("IT DID NOT LIKE THAT") }
+                else { e.passive = true; calmBehaviour(e, d, ex, ey, dt); continue }
+            }
+            e.passive = false
+            val smilerHome = e.home
+            val awake = e.type != 2 || smilerHome == null || (floor(x).toInt() in smilerHome[0]..smilerHome[2] && floor(y).toInt() in smilerHome[1]..smilerHome[3]) // a building's Smiler sleeps until you come in
+            if (awake) pr = max(pr, 1 - d / 12)
+            val sight = dif.sight
             if (e.type == 3) { // Skin-Stealer: walks like a player, patiently closes in
                 if (d < 16 * sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22 * sight) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
@@ -568,32 +667,21 @@ class Game {
                 if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
                 if (e.chase) dg = max(dg, 1 - d / (10 * sight))
-            } else if (e.type == 4) { // Faceling: drifts around, ignores you until you crowd it
-                if (d < 3.5 && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 14) e.chase = false
+            } else if (e.type == 4) { // Faceling: drifts around, ignores you until you crowd it (a provoked one hunts you)
+                if (d < (if (e.provoked) 12.0 else 3.5) && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 14) e.chase = false
                 if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 2.6 else 0.7) * dif.speed * dt)
                 if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
                 if (e.chase) dg = max(dg, (1 - d / 8).coerceAtLeast(0.0))
-            } else if (e.type == 5) { // Lucky Crane: harmless and shy; leaves a ration behind if you get close
-                if (d < 5) e.dir = atan2(-ey, -ex) + (Math.random() - 0.5) * 0.6 else e.dir += (Math.random() - 0.5) * dt * 2.5
-                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (d < 5) 2.4 else 0.9) * dt)
-                if (r.first == e.x && r.second == e.y) e.dir += 1.6
-                e.x = r.first; e.y = r.second
-                if (d < 2.2 && !e.gift && !dif.explore) { e.gift = true; extra.add(Supply(floor(e.x).toInt(), floor(e.y).toInt(), 1)); scanX = Int.MIN_VALUE; say("A LUCKY CRANE LEFT A RATION") }
-            } else if (e.type == 6) { // Living Pizza: runs away; catch it (sprint!) and it is food
-                if (d < 6) e.dir = atan2(-ey, -ex) + (Math.random() - 0.5) * 0.8 else e.dir += (Math.random() - 0.5) * dt * 2.5
-                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (d < 6) 2.8 else 0.8) * dt)
-                if (r.first == e.x && r.second == e.y) e.dir += 1.6
-                e.x = r.first; e.y = r.second
-                if (d < 0.8 && !dif.explore) { entities.remove(e); hunger = min(1.0, hunger + 0.5); say("YOU CAUGHT A LIVING PIZZA  ·  +FOOD"); continue }
-            } else { // Smiler: only moves while you are NOT looking at it, drifts through walls
+            } else if (awake) { // Smiler: only moves while you are NOT looking at it, drifts through walls (a building's Smiler stays inside it)
                 var df = (atan2(e.y - y, e.x - x) - a) % (2 * PI)
                 if (df > PI) df -= 2 * PI; if (df < -PI) df += 2 * PI
                 val seen = abs(df) < 0.8 && los(level, x, y, e.x, e.y)
                 if (!seen) { e.x += ex / d * 1.9 * dif.speed * dt; e.y += ey / d * 1.9 * dif.speed * dt } else dg = max(dg, 1 - d / 14)
+                if (smilerHome != null) { e.x = e.x.coerceIn(smilerHome[0] + 1.0, smilerHome[2].toDouble()); e.y = e.y.coerceIn(smilerHome[1] + 1.0, smilerHome[3].toDouble()) }
             }
-            if (d < dif.catchR && (e.type <= 3 || (e.type == 4 && e.chase))) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
+            if (awake && d < dif.catchR && (e.type <= 3 || (e.type == 4 && e.chase))) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
         }
         danger = dg.coerceIn(0.0, 1.0)
         presence += (pr - presence) * min(1.0, dt * 3)
@@ -897,6 +985,35 @@ object City {
         if (k < 0.07) return 3
         if (k < 0.14) return 4
         return if (height(x, y) >= 7) 1 else if (h(bx, by, 161) < 0.5) 0 else 2
+    }
+
+    /** Footprint [x0, y0, x1, y1] (cell coordinates, inclusive) of the hollow building in block (bx, by), or null. */
+    private fun foot(bx: Int, by: Int): IntArray? {
+        val k = h(bx, by, 150); if (k < 0.50) return null
+        val sx = 6 + (h(bx, by, 151) * 5).toInt(); val sy = 6 + (h(bx, by, 152) * 5).toInt()
+        val x0 = bx * 16 + 6 + ((10 - sx) * h(bx, by, 153)).toInt(); val y0 = by * 16 + 6 + ((10 - sy) * h(bx, by, 154)).toInt()
+        return intArrayOf(x0, y0, x0 + sx - 1, y0 + sy - 1)
+    }
+    /** The footprint of the hollow building whose open floor contains cell (x, y), else null. */
+    fun hollowAt(x: Int, y: Int): IntArray? {
+        val f = foot(x shr 4, y shr 4) ?: return null
+        return if (x in f[0] + 1..f[2] - 1 && y in f[1] + 1..f[3] - 1 && !wall(x, y)) f else null
+    }
+    /** Some hollow buildings are stocked: supplies all over the floor. This is where Hounds lead you. */
+    fun stocked(bx: Int, by: Int) = foot(bx, by) != null && h(bx, by, 190) < 0.35
+    fun cacheCell(x: Int, y: Int) = hollowAt(x, y) != null && stocked(x shr 4, y shr 4)
+    /** An open floor cell inside the nearest stocked building within 3 blocks of (wx, wy), or null. */
+    fun stockedNear(wx: Double, wy: Double): IntArray? {
+        val b0x = floor(wx).toInt() shr 4; val b0y = floor(wy).toInt() shr 4
+        var best: IntArray? = null; var bd = 1e9
+        for (by in b0y - 3..b0y + 3) for (bx in b0x - 3..b0x + 3) {
+            if (!stocked(bx, by)) continue
+            val f = foot(bx, by)!!; val cx = (f[0] + f[2]) / 2; val cy = (f[1] + f[3]) / 2
+            var cell: IntArray? = null
+            for (dy in -2..2) for (dx in -2..2) if (cell == null && hollowAt(cx + dx, cy + dy) != null) cell = intArrayOf(cx + dx, cy + dy)
+            if (cell != null) { val d = hypot(cell[0] + 0.5 - wx, cell[1] + 0.5 - wy); if (d < bd) { bd = d; best = cell } }
+        }
+        return best
     }
 
     /** A street lamp stands on lattice cell (ix, iy) if that is open ground in the street grid. */
@@ -1221,36 +1338,15 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                     else -> abs(abs(u) - 0.35) < 0.22
                 }
                 if (!inside) 0
-                else if (type == 4) {
-                    if (v >= 0.17) sc(40, 42, 56, dim)
-                    else if (sq((u + 0.12) / 0.06) + sq((v - 0.07) / 0.016) < 1 || sq((u - 0.2) / 0.05) + sq((v - 0.105) / 0.02) < 1 || (abs(u + 0.02) < 0.12 && abs(v - 0.145) < 0.006)) dark
-                    else sc(208, 192, 178, dim)
+                else if (type == 4) { // Faceling: an ordinary person in a grey jacket, but the face is a blank, only a trace of eyes and mouth smudged into the skin
+                    if (v < 0.17) {
+                        val sm = exp(-(sq((abs(u) - 0.12) / 0.07) + sq((v - 0.075) / 0.02))) * 0.25 + exp(-(sq(u / 0.1) + sq((v - 0.135) / 0.012))) * 0.2
+                        val f = 1.0 - 0.5 * sm
+                        sc((226 * f).toInt(), (206 * f).toInt(), (190 * f).toInt(), dim)
+                    } else if (v < 0.58) sc(62, 68, 90, dim) else sc(38, 40, 50, dim)
                 }
                 else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225)
                 else if (fr && type == 3 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(130, 255, 160) else dark
-            }
-            5 -> { // Lucky Crane: white bird, red crown, long neck
-                val head = sq((u + 0.45) / 0.12) + sq((v - 0.17) / 0.09) < 1
-                val neck = abs(u + 0.42) < 0.07 && v in 0.2..0.55
-                val body = sq((u - 0.05) / 0.5) + sq((v - 0.58) / 0.2) < 1
-                when {
-                    head && v < 0.12 -> sc(210, 40, 40, dim)
-                    head || neck || body -> sc(236, 236, 226, dim)
-                    v in 0.14..0.2 && u in -0.8..-0.56 -> sc(200, 120, 40, dim)
-                    u in 0.45..0.8 && abs(v - (0.52 - (u - 0.45) * 0.4)) < 0.05 -> sc(40, 40, 44, dim)
-                    v > 0.76 && (abs(u) < 0.03 || abs(u - 0.2) < 0.03) -> sc(200, 120, 40, dim)
-                    else -> 0
-                }
-            }
-            6 -> { // Living Pizza: round, crust, cheese, pepperoni and a worried face
-                val r2 = sq(u * 0.5) + sq(v - 0.55)
-                if (r2 > 0.2) 0
-                else if (sq((abs(u) - 0.35) / 0.06) + sq((v - 0.46) / 0.03) < 1) sc(20, 16, 14, dim)
-                else if (sq((abs(u) - 0.35) / 0.17) + sq((v - 0.45) / 0.075) < 1) sc(245, 245, 240, dim)
-                else if (abs(u) < 0.3 && abs(v - (0.68 + 0.04 * sq(u / 0.3))) < 0.015) sc(120, 30, 24, dim)
-                else if (sq((u + 0.55) / 0.17) + sq((v - 0.65) / 0.08) < 1 || sq((u - 0.5) / 0.17) + sq((v - 0.7) / 0.08) < 1 || sq(u / 0.17) + sq((v - 0.3) / 0.08) < 1) sc(176, 52, 42, dim)
-                else if (r2 > 0.15) sc(206, 140, 60, dim)
-                else sc(250, 205, 92, dim)
             }
             9 -> if (v < 0.06 && abs(u) < 0.9) pack(255, 236, 170) else if (abs(u) < 0.18) sc(70, 72, 80, dim) else 0 // street lamp
             7 -> { // ration: tin can
@@ -1374,8 +1470,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             for (ky in floor((y - 14 - 0.5) / 8).toInt()..floor((y + 14 - 0.5) / 8).toInt()) for (kx in floor((x - 14 - 0.5) / 8).toInt()..floor((x + 14 - 0.5) / 8).toInt())
                 if (City.lampOk(kx * 8, ky * 8)) items.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, 9.0))
         }
-        val friendly = Settings.explore
-        for (e in g.entities) items.add(if (friendly && e.type in 1..4) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
+        for (e in g.entities) items.add(if (e.passive && e.type in 1..4) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
         for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) 7.0 else 8.0))
         for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
         items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
@@ -1385,8 +1480,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val hk = when (type) { 1 -> 0.6; 5 -> 0.55; 6 -> 0.45; 7 -> 0.2; 8 -> 0.26; 9 -> 1.7; else -> 0.9 }
-            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 0.9; 6 -> 1.0; 7 -> 0.9; 8 -> 0.55; 9 -> 0.25; else -> 0.42 }
+            val hk = when (type) { 1 -> 0.6; 7 -> 0.2; 8 -> 0.26; 9 -> 1.7; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 7 -> 0.9; 8 -> 0.55; 9 -> 0.25; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
             val bottom = hz + (full / 2).toInt(); val top = bottom - sh
