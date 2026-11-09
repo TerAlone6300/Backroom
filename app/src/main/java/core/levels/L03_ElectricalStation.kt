@@ -2,10 +2,10 @@ package com.backrooms.game
 // L03_ElectricalStation.kt - Level 3: Electrical Station. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 3 = Backrooms Level 3, Electrical Station. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+/** Level 3: Electrical Station. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
 object Level03ElectricalStation : LevelSpec {
-    override val def = LevelDef(3, "LEVEL 3", "ELECTRICAL STATION", "Humming transformers in a grid of machines. Hunters follow the sparks.", "HOUNDS", 1, 4, 4, 0.06, 0.50, 0.028, intArrayOf(230, 240, 256), 0x6FA8FF)
-    override val noclip = intArrayOf(4, 2, 11, 12)
+    override val def = LevelDef(3, "LEVEL 3", "ELECTRICAL STATION", "Humming transformers in a grid of machines. Hunters follow the sparks.", "HOUNDS", 1, 4, 4, 0.06, 0.50, 0.028, intArrayOf(230, 240, 256), 0x6FA8FF, danger = 4)
+    override val noclip = intArrayOf(4, 5, 4, 5)
     override val flicker = doubleArrayOf(0.25, 0.35, 0.45)
 
     override fun wall(x: Int, y: Int): Boolean { // Electrical Station: 3x3 machines in a grid of 2-wide streets

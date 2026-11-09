@@ -1,12 +1,12 @@
 package com.backrooms.game
-// L12_TheCity.kt - Level 12: The City That Never Sleeps. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
+// L11_TheCity.kt - Level 11: The City That Never Sleeps. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 12 = Backrooms Level 11, The City That Never Sleeps. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
-object Level12TheCity : LevelSpec {
-    override val def = LevelDef(12, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "SMILERS · HOUNDS · FACELINGS", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
-        calm = 0.45, cast = intArrayOf(4, 1, 4, 2, 1, 4, 1, 2), safe = true, lamp0 = 0.5) // 3 Facelings, 3 Hounds, 2 Smilers (scaled by difficulty)
-    override val noclip = intArrayOf(1, 4, 6, 10)
+/** Level 11: The City That Never Sleeps. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+object Level11TheCity : LevelSpec {
+    override val def = LevelDef(11, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "SMILERS · HOUNDS · FACELINGS", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
+        calm = 0.45, cast = intArrayOf(4, 1, 4, 2, 1, 4, 1, 2), safe = true, lamp0 = 0.5, danger = 2) // 3 Facelings, 3 Hounds, 2 Smilers (scaled by difficulty)
+    override val noclip = intArrayOf(1, 3, 4, 37)
     override val flicker = doubleArrayOf(0.02, 0.05, 0.06)
     private val SPEC = TexSpec(intArrayOf(104, 100, 114), intArrayOf(58, 58, 64), intArrayOf(16, 20, 40), intArrayOf(255, 236, 170), 0, 0)
 
@@ -113,7 +113,7 @@ object City {
     }
 
     /** A street lamp stands on lattice cell (ix, iy) if that is open ground in the street grid. */
-    fun lampOk(ix: Int, iy: Int) = ((ix and 15) < 6 || (iy and 15) < 6) && !isWall(12, ix, iy)
+    fun lampOk(ix: Int, iy: Int) = ((ix and 15) < 6 || (iy and 15) < 6) && !isWall(LV_CITY, ix, iy)
 
     /** Ground colour at (wx, wy): asphalt with lane lines and zebra crossings, sidewalks, park grass, plaza tiles, lot pavement. `base` = asphalt grain. */
     fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int {

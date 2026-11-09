@@ -2,10 +2,10 @@ package com.backrooms.game
 // L04_AbandonedOffice.kt - Level 4: Abandoned Office. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 4 = Backrooms Level 4, Abandoned Office. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+/** Level 4: Abandoned Office. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
 object Level04AbandonedOffice : LevelSpec {
-    override val def = LevelDef(4, "LEVEL 4", "ABANDONED OFFICE", "Dead cubicles, stained ceilings. Someone is still typing.", "SKIN-STEALERS", 3, 2, 4, 0.18, 0.34, 0.018, intArrayOf(256, 252, 240), 0xD8CFA8)
-    override val noclip = intArrayOf(5, 3, 0, 12)
+    override val def = LevelDef(4, "LEVEL 4", "ABANDONED OFFICE", "Dead cubicles, stained ceilings. Someone is still typing.", "SKIN-STEALERS", 3, 2, 4, 0.18, 0.34, 0.018, intArrayOf(256, 252, 240), 0xD8CFA8, danger = 1)
+    override val noclip = intArrayOf(5, 6, 5, 3)
     override val flicker = doubleArrayOf(0.15, 0.22, 0.30)
 
     override fun wall(x: Int, y: Int): Boolean { // Abandoned Office: cubicle partitions with 1-cell openings

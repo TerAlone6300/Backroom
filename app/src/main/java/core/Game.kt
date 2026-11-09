@@ -42,7 +42,7 @@ class Game {
     }
 
     /** True when other players cannot see you (Level 0 and Level 201), except inside the Manila Room. */
-    fun isolated() = LEVELS[level].isolated && !(level == 0 && Manila.inside(x, y))
+    fun isolated() = levelDef(level).isolated && !(level == 0 && Manila.inside(x, y))
 
     private var ncK = 0
     private fun noclipTarget() = noclipDest(level, ncK)
@@ -58,8 +58,8 @@ class Game {
 
     fun enter(lv: Int, arrived: String = "YOU SLIPPED OUT OF REALITY") {
         level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived; resetLevelState()
-        if (lv == 12) City.warm()
-        if (lv == 12) say("LEVEL 11 EFFECT  ·  hostile entities are less likely to attack you")
+        if (lv == LV_CITY) City.warm()
+        if (lv == LV_CITY) say("LEVEL 11 EFFECT  ·  hostile entities are less likely to attack you")
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
         remember(lv)
         // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
@@ -73,10 +73,10 @@ class Game {
 
     private fun spawnEntities() {
         entities.clear(); presence = 0.0
-        val df = DIFFS[Settings.diff]; val ld = LEVELS[level]; val cast = ld.cast
+        val df = DIFFS[Settings.diff]; val ld = levelDef(level); val cast = ld.cast
         val n = if (cast.isEmpty()) ld.eCount else cast.size // entity-free levels stay entity-free
         repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) { i ->
-            if (level == 12 && !cast.isEmpty() && cast[i % cast.size] == 2) { val s = spawnInBuilding(); if (s != null) { entities.add(s); return@repeat } }
+            if (level == LV_CITY && !cast.isEmpty() && cast[i % cast.size] == 2) { val s = spawnInBuilding(); if (s != null) { entities.add(s); return@repeat } }
             val ang = Math.random() * 6.283; val d = (11 + Math.random() * 8) * df.spawn
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
             entities.add(Entity(q.first, q.second, if (cast.isEmpty()) ld.eType else cast[i % cast.size]))
@@ -159,7 +159,7 @@ class Game {
 
     /** Resume a save: same level and spot; entities start fresh, 11+ cells away. */
     fun restore(s: SaveData) {
-        level = s.level.coerceIn(0, LEVELS.size - 1); levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
+        level = if (levelExists(s.level)) s.level else 0; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
         arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
         a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
         resetLevelState(); hunger = s.hunger.coerceIn(0.0, 1.0); rations = s.rations.coerceIn(0, 9); water = s.water.coerceIn(0, 9); lobbyT = s.lobbyT.coerceAtLeast(0.0); starveT = 0.0
@@ -208,7 +208,7 @@ class Game {
         noclip = if (pushing) min(1.0, noclip + dt / 2.2) else max(0.0, noclip - dt * 1.2)
         if (noclip >= 1.0) { enter(noclipTarget(), "YOU NOCLIPPED THROUGH THE WALL"); flash = 1.0; return }
 
-        near = NOCLIPS[level].minOf { hypot(it[0] + 0.5 - x, it[1] + 0.5 - y) }.let { (1 - it / 22).coerceIn(0.0, 1.0) }
+        near = (NOCLIPS[level] ?: emptyList()).minOfOrNull { hypot(it[0] + 0.5 - x, it[1] + 0.5 - y) }.let { if (it == null) 0.0 else (1 - it / 22).coerceIn(0.0, 1.0) }
         val inM = level == 0 && Manila.inside(x, y)
         manilaNear = if (level == 0 && !inM) (1 - hypot(Manila.CX + 4.5 - x, Manila.CY + 4.5 - y) / 45).coerceIn(0.0, 1.0) else 0.0
         manilaT = if (inM) manilaT + dt else 0.0
@@ -220,7 +220,7 @@ class Game {
         updateGhosts(dt)
 
         var dg = 0.0; var pr = 0.0
-        val cityFx = LEVELS[level].calm < 1.0 // Level 11 Effect
+        val cityFx = levelDef(level).calm < 1.0 // Level 11 Effect
         for (e in entities) {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
             if (dif.explore && e.type in 1..4) { // Explore: every monster is friendly. It wanders, and tags along at a polite distance

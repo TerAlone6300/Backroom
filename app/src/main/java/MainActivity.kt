@@ -108,7 +108,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     }
 
     private fun confirmDelete(s: SaveData) {
-        AlertDialog.Builder(act).setTitle("Delete this save?").setMessage("${LEVELS[s.level.coerceIn(0, LEVELS.size - 1)].name}\n${s.info()}")
+        AlertDialog.Builder(act).setTitle("Delete this save?").setMessage("${levelDef(s.level).name}\n${s.info()}")
             .setPositiveButton("Delete") { _, _ -> Store.delete(s.id); saves = Store.list() }
             .setNegativeButton("Cancel", null).show()
     }
@@ -251,7 +251,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     }
 
     private fun drawMain(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(LEVELS[0])
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         dim(c, 210, 170)
         heading(c, "THE BACKROOMS", a, h * 0.19f)
         small(c, "POCKET EDITION  ·  MULTIPLAYER", w / 2, h * 0.26f, 11f, Color.rgb(220, 212, 185), spacing = 0.3f, bold = true)
@@ -266,7 +266,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
 
     /** Side drawer with the unlocked levels; the arrow tab on the left edge opens it. */
     private fun drawLevels(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(LEVELS[0])
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         val pw = min(w * 0.42f, 260 * dp); val left = -pw + pw * levelsAnim
         if (levelsAnim > 0.01f) {
             pFill.style = Paint.Style.FILL; pFill.color = Color.argb((130 * levelsAnim).toInt(), 0, 0, 0); c.drawRect(0f, 0f, w, h, pFill)
@@ -275,7 +275,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             pFill.color = Color.argb(240, 14, 13, 10); c.drawRect(body, pFill)
             pFill.color = Color.argb(120, 244, 228, 130); c.drawRect(left + pw - 2 * dp, 0f, left + pw, h, pFill)
             hit(body) {}
-            val ul = LEVELS.indices.filter { Progress.found[it] }
+            val ul = LEVELS.filter { Progress.has(it.id) }
             small(c, "UNLOCKED LEVELS", left + 14 * dp, 26 * dp, 10f, a, Paint.Align.LEFT, 0.25f, true)
             small(c, "${ul.size} / ${LEVELS.size}  ·  tap to play", left + 14 * dp, 41 * dp, 8.5f, Color.rgb(160, 155, 130), Paint.Align.LEFT)
             val lt = 52 * dp; val list = RectF(left, lt, left + pw - 2 * dp, h - 6 * dp)
@@ -283,21 +283,21 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             scrollY = scrollY.coerceIn(0f, max(0f, ul.size * (rh + gp) - list.height()))
             nextScroll = list
             c.save(); c.clipRect(list)
-            ul.forEachIndexed { k, i ->
-                val d = LEVELS[i]; val top = lt + k * (rh + gp) - scrollY
+            ul.forEachIndexed { k, d ->
+                val top = lt + k * (rh + gp) - scrollY
                 val rc = RectF(left + 10 * dp, top, left + pw - 14 * dp, top + rh)
                 if (rc.bottom < list.top || rc.top > list.bottom) return@forEachIndexed
                 card(c, rc, d, if (d.entities == "NONE") "SAFE" else d.entities, if (d.entities == "NONE") Color.rgb(150, 200, 150) else Color.rgb(235, 110, 90))
                 pFill.style = Paint.Style.FILL; pFill.color = acc(d) // play triangle
                 val tx = rc.right - 20 * dp; val ty = rc.centerY()
                 c.drawPath(Path().apply { moveTo(tx, ty - 8 * dp); lineTo(tx + 12 * dp, ty); lineTo(tx, ty + 8 * dp); close() }, pFill)
-                hitClip(rc, list) { startGame(lv = i) }
+                hitClip(rc, list) { startGame(lv = d.id) }
             }
             c.restore()
         }
         val tab = RectF(left + pw - 8 * dp, h / 2 - 36 * dp, left + pw + 26 * dp, h / 2 + 36 * dp)
         pFill.style = Paint.Style.FILL; pFill.color = Color.argb(215, 14, 13, 10); c.drawRoundRect(tab, 10 * dp, 10 * dp, pFill)
-        pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 1.5f * dp; pFill.color = acc(LEVELS[0], 150); c.drawRoundRect(tab, 10 * dp, 10 * dp, pFill)
+        pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 1.5f * dp; pFill.color = acc(levelDef(0), 150); c.drawRoundRect(tab, 10 * dp, 10 * dp, pFill)
         val dir = 1f - 2f * levelsAnim; val cx = tab.right - 13 * dp; val cy = tab.centerY()
         pFill.strokeWidth = 2.5f * dp; pFill.strokeCap = Paint.Cap.ROUND; pFill.strokeJoin = Paint.Join.ROUND; pFill.color = a
         c.drawPath(Path().apply { moveTo(cx - 3 * dp * dir, cy - 8 * dp); lineTo(cx + 3 * dp * dir, cy); lineTo(cx - 3 * dp * dir, cy + 8 * dp) }, pFill)
@@ -306,7 +306,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     }
 
     private fun drawSaves(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(LEVELS[0])
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         dim(c, 225, 200)
         heading(c, "SELECT SAVE", a, h * 0.15f)
         val lw = min(w * 0.7f, 520 * dp); val lx = (w - lw) / 2; val top = h * 0.22f
@@ -320,7 +320,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         y += rhNew + gp
         if (saves.isEmpty()) small(c, "No saves yet  ·  use  Save & Quit  in the pause menu", w / 2, y + 16 * dp, 10.5f, Color.rgb(170, 165, 140))
         for (s in saves) {
-            val d = LEVELS[s.level.coerceIn(0, LEVELS.size - 1)]; val rc = RectF(lx, y, lx + lw, y + rh)
+            val d = levelDef(s.level); val rc = RectF(lx, y, lx + lw, y + rh)
             if (rc.bottom >= list.top && rc.top <= list.bottom) {
                 card(c, rc, d, s.info(), Color.rgb(200, 195, 165))
                 hitClip(rc, list) { startGame(load = s) }
@@ -340,7 +340,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
 
     /** Labelled slider; returns its touch rectangle. ticks = (position 0..1, label, highlighted). */
     private fun drawSlider(c: Canvas, title: String, value: String, tl: Float, tr: Float, yTitle: Float, yTrack: Float, frac: Float, ticks: List<Triple<Float, String, Boolean>>): RectF {
-        val a = acc(LEVELS[0])
+        val a = acc(levelDef(0))
         small(c, title, tl, yTitle, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
         small(c, value, tr, yTitle, 12f, Color.WHITE, Paint.Align.RIGHT, 0.05f, true)
         pFill.style = Paint.Style.FILL; pFill.color = Color.argb(110, 255, 255, 255); c.drawRoundRect(RectF(tl, yTrack - 2 * dp, tr, yTrack + 2 * dp), 2 * dp, 2 * dp, pFill)
@@ -357,7 +357,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     }
 
     private fun drawOptions(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(LEVELS[0])
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         dim(c, 220, 200)
         heading(c, "OPTIONS", a, h * 0.15f)
         val tl = w * 0.10f; val tr = w * 0.55f
@@ -378,7 +378,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     }
 
     private fun drawPause(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val d = LEVELS[g.level]; val a = acc(d)
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val d = levelDef(g.level); val a = acc(d)
         dim(c, 190, 190)
         heading(c, "PAUSED", a, h * 0.21f)
         small(c, "${d.label}  ·  ${d.name}", w / 2, h * 0.28f, 11f, Color.rgb(220, 212, 185), spacing = 0.2f, bold = true)
@@ -390,7 +390,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
 
     /** In-game buttons: small options icon (top-centre) and the walk / run toggle (bottom-right). */
     private fun drawControls(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(LEVELS[g.level])
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(g.level))
         val ob = RectF(w / 2 - 15 * dp, 8 * dp, w / 2 + 15 * dp, 28 * dp)
         pFill.style = Paint.Style.FILL; pFill.color = Color.argb(80, 0, 0, 0); c.drawRoundRect(ob, 7 * dp, 7 * dp, pFill)
         pFill.color = Color.argb(190, 255, 255, 255)
@@ -410,7 +410,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     }
 
     private fun drawHud(c: Canvas) {
-        val w = c.width.toFloat(); val h = c.height.toFloat(); val d = LEVELS[g.level]; val a = acc(d)
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val d = levelDef(g.level); val a = acc(d)
         // badge
         pFill.style = Paint.Style.FILL; pFill.color = Color.argb(120, 0, 0, 0)
         c.drawRoundRect(RectF(12 * dp, 12 * dp, 230 * dp, 76 * dp), 10 * dp, 10 * dp, pFill)

@@ -31,9 +31,11 @@ class Ghost(var x: Double, var y: Double, val type: Int, var life: Double)
 
 /** Where noclip wall `k` of level `lv` leads. In Explore mode, most of the time (ExploreRules.SAFE_NOCLIP_CHANCE) a Safe & Secure level instead. */
 fun noclipDest(lv: Int, k: Int): Int {
-    val fixed = LEVEL_SPECS[lv].noclip[k]
+    val dest = levelSpec(lv).noclip
+    if (dest.isEmpty()) return lv
+    val fixed = dest[k]
     if (!Settings.explore || Math.random() >= ExploreRules.SAFE_NOCLIP_CHANCE) return fixed
-    val safe = LEVELS.indices.filter { LEVELS[it].safe && it != lv }
+    val safe = LEVELS.filter { it.safe && it.id != lv }.map { it.id }
     return if (safe.isEmpty()) fixed else safe[(Math.random() * safe.size).toInt()]
 }
 
@@ -42,8 +44,8 @@ fun supplyAt(lv: Int, x: Int, y: Int): Int {
     if (Settings.explore) return 0 // no hunger in Explore, so no supplies
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
-    if (lv == 12 && City.cacheCell(x, y)) return if (h(x, y, 191) >= 0.22) 0 else if (h(x, y, 881) < 0.4) 2 else 1 // stocked building
-    val p = if (lv == 0) 0.12 else if (lv == 12) 0.0006 else 0.0010
+    if (lv == LV_CITY && City.cacheCell(x, y)) return if (h(x, y, 191) >= 0.22) 0 else if (h(x, y, 881) < 0.4) 2 else 1 // stocked building
+    val p = if (lv == 0) 0.12 else if (lv == LV_CITY) 0.0006 else 0.0010
     if (h(x, y, 880 + lv) >= p) return 0
     return if (h(x, y, 881) < 0.4) 2 else 1
 }

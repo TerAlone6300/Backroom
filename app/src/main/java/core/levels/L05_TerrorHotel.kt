@@ -2,10 +2,10 @@ package com.backrooms.game
 // L05_TerrorHotel.kt - Level 5: Terror Hotel. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 5 = Backrooms Level 5, Terror Hotel. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+/** Level 5: Terror Hotel. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
 object Level05TerrorHotel : LevelSpec {
-    override val def = LevelDef(5, "LEVEL 5", "TERROR HOTEL", "Red carpet, endless corridors, a door for every secret.", "SMILERS", 2, 3, 4, 0.08, 0.45, 0.026, intArrayOf(256, 225, 190), 0xD04A4A)
-    override val noclip = intArrayOf(6, 4, 10, 2)
+    override val def = LevelDef(5, "LEVEL 5", "TERROR HOTEL", "Red carpet, endless corridors, a door for every secret.", "SMILERS", 2, 3, 4, 0.08, 0.45, 0.026, intArrayOf(256, 225, 190), 0xD04A4A, danger = 2)
+    override val noclip = intArrayOf(3, 4, 6, 6)
     override val flicker = doubleArrayOf(0.18, 0.30, 0.38)
 
     override fun wall(x: Int, y: Int): Boolean { // Terror Hotel: long corridors, rooms with a door each

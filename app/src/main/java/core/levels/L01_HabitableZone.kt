@@ -2,10 +2,10 @@ package com.backrooms.game
 // L01_HabitableZone.kt - Level 1: Habitable Zone. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 1 = Backrooms Level 1, Habitable Zone. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+/** Level 1: Habitable Zone. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
 object Level01HabitableZone : LevelSpec {
-    override val def = LevelDef(1, "LEVEL 1", "HABITABLE ZONE", "Cold concrete halls. Something is breathing in the dark.", "HOUNDS", 1, 3, 5, 0.17, 0.30, 0.018, intArrayOf(232, 250, 244), 0x9FD4C8)
-    override val noclip = intArrayOf(2, 0, 9, 12)
+    override val def = LevelDef(1, "LEVEL 1", "HABITABLE ZONE", "Cold concrete halls. Something is breathing in the dark.", "HOUNDS", 1, 3, 5, 0.17, 0.30, 0.018, intArrayOf(232, 250, 244), 0x9FD4C8, danger = 1)
+    override val noclip = intArrayOf(2, 2, 2, 2)
     override val flicker = doubleArrayOf(0.20, 0.28, 0.40)
 
     override fun wall(x: Int, y: Int): Boolean { // Habitable Zone: huge hall, pillar grid, long concrete walls

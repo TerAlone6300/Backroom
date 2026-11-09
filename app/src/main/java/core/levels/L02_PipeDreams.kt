@@ -2,10 +2,10 @@ package com.backrooms.game
 // L02_PipeDreams.kt - Level 2: Pipe Dreams. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 2 = Backrooms Level 2, Pipe Dreams. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+/** Level 2: Pipe Dreams. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
 object Level02PipeDreams : LevelSpec {
-    override val def = LevelDef(2, "LEVEL 2", "PIPE DREAMS", "Hot, rusted tunnels. Don't look away.", "SMILERS", 2, 2, 4, 0.07, 0.45, 0.030, intArrayOf(256, 205, 150), 0xF0A050)
-    override val noclip = intArrayOf(3, 1, 10, 4)
+    override val def = LevelDef(2, "LEVEL 2", "PIPE DREAMS", "Hot, rusted tunnels. Don't look away.", "SMILERS", 2, 2, 4, 0.07, 0.45, 0.030, intArrayOf(256, 205, 150), 0xF0A050, danger = 3)
+    override val noclip = intArrayOf(3, 4, 3, 1)
     override val flicker = doubleArrayOf(0.15, 0.25, 0.32)
 
     override fun wall(x: Int, y: Int): Boolean { // Pipe Dreams: tight 2-wide tunnels, 1-cell doors

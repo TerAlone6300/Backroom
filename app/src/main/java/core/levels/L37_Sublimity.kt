@@ -1,11 +1,11 @@
 package com.backrooms.game
-// L06_Poolrooms.kt - Level 6: The Poolrooms. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
+// L37_Sublimity.kt - Level 37: Sublimity. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 6 = Backrooms Level 37, The Poolrooms. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
-object Level06Poolrooms : LevelSpec {
-    override val def = LevelDef(6, "LEVEL 37", "THE POOLROOMS", "Warm tiled halls and still water. Finally, peace.", "NONE", 0, 0, 5, 0.55, 0.12, 0.006, intArrayOf(236, 250, 256), 0x6FD8E8, safe = true)
-    override val noclip = intArrayOf(8, 5, 0, 12)
+/** Level 37: Sublimity. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+object Level37Sublimity : LevelSpec {
+    override val def = LevelDef(37, "LEVEL 37", "SUBLIMITY", "Warm tiled halls and still water. Finally, peace.", "NONE", 0, 0, 5, 0.55, 0.12, 0.006, intArrayOf(236, 250, 256), 0x6FD8E8, safe = true, danger = 1)
+    override val noclip = intArrayOf(75, 5, 0, 11)
     override val flicker = doubleArrayOf(0.02, 0.05, 0.05)
 
     override fun wall(x: Int, y: Int): Boolean { // Poolrooms: bright halls, columns, wide archways

@@ -73,7 +73,7 @@ fun main(args: Array<String>) {
         net?.close(); net = null; slot = null; playing = false; scr = Scr.MAIN; setCursor(false)
     }
     fun confirmDelete(s: SaveData) {
-        val d = LEVELS[s.level.coerceIn(0, LEVELS.size - 1)]
+        val d = levelDef(s.level)
         if (JOptionPane.showConfirmDialog(panel, "Delete this save?\n${d.name}  ·  ${s.info()}", "Backrooms", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
             Store.delete(s.id); saves = Store.list()
         }
@@ -141,7 +141,7 @@ fun main(args: Array<String>) {
         }
 
         fun drawMain(g2: Graphics2D) {
-            val w = width; val hh = height; val cx = w / 2; val ac = Color(LEVELS[0].accent)
+            val w = width; val hh = height; val cx = w / 2; val ac = Color(levelDef(0).accent)
             dim(g2, 210, 170)
             heading(g2, "THE BACKROOMS", ac, 0.17)
             txt(g2, "POCKET EDITION  ·  MULTIPLAYER", cx, (hh * 0.23).toInt(), spaced(Font("SansSerif", Font.PLAIN, hh / 40), 0.3f), Color(220, 212, 185))
@@ -157,7 +157,7 @@ fun main(args: Array<String>) {
 
         /** Side drawer with the unlocked levels; the arrow tab on the left edge opens it. */
         fun drawLevels(g2: Graphics2D) {
-            val w = width; val hh = height; val ac = Color(LEVELS[0].accent)
+            val w = width; val hh = height; val ac = Color(levelDef(0).accent)
             val pw = max(260, w / 4); val left = (-pw + pw * levelsAnim).toInt()
             if (levelsAnim > 0.01) {
                 g2.color = Color(0, 0, 0, (130 * levelsAnim).toInt()); g2.fillRect(0, 0, w, hh)
@@ -166,19 +166,19 @@ fun main(args: Array<String>) {
                 g2.color = Color(14, 13, 10, 240); g2.fill(body)
                 g2.color = Color(244, 228, 130, 120); g2.fillRect(left + pw - 2, 0, 2, hh)
                 hit(body) {}
-                val ul = LEVELS.indices.filter { Progress.found[it] }
+                val ul = LEVELS.filter { Progress.has(it.id) }
                 txt(g2, "UNLOCKED LEVELS", left + 16, 32, spaced(Font("SansSerif", Font.BOLD, max(12, hh / 44)), 0.25f), ac, false)
                 txt(g2, "${ul.size} / ${LEVELS.size}  ·  click to play", left + 16, 52, Font("SansSerif", Font.PLAIN, max(10, hh / 60)), Color(160, 155, 130), false)
                 val lt = 66; val list = Rectangle(left, lt, pw - 2, hh - lt - 8); val rh = 64; val gp = 8
                 scrollY = scrollY.coerceIn(0, max(0, ul.size * (rh + gp) - list.height))
                 val oldClip = g2.clip; g2.clip = list
-                ul.forEachIndexed { k, i ->
-                    val d = LEVELS[i]; val rc = Rectangle(left + 12, lt + k * (rh + gp) - scrollY, pw - 28, rh)
+                ul.forEachIndexed { k, d ->
+                    val rc = Rectangle(left + 12, lt + k * (rh + gp) - scrollY, pw - 28, rh)
                     if (rc.y + rc.height < list.y || rc.y > list.y + list.height) return@forEachIndexed
                     card(g2, rc, d, if (d.entities == "NONE") "SAFE" else d.entities, if (d.entities == "NONE") Color(150, 200, 150) else Color(235, 110, 90))
                     g2.color = Color(d.accent) // play triangle
                     g2.fillPolygon(intArrayOf(rc.x + rc.width - 26, rc.x + rc.width - 26, rc.x + rc.width - 12), intArrayOf(rc.y + rh / 2 - 9, rc.y + rh / 2 + 9, rc.y + rh / 2), 3)
-                    hitClip(rc, list) { startGame(lv = i) }
+                    hitClip(rc, list) { startGame(lv = d.id) }
                 }
                 g2.clip = oldClip
             }
@@ -192,7 +192,7 @@ fun main(args: Array<String>) {
         }
 
         fun drawSaves(g2: Graphics2D) {
-            val w = width; val hh = height; val cx = w / 2; val ac = Color(LEVELS[0].accent)
+            val w = width; val hh = height; val cx = w / 2; val ac = Color(levelDef(0).accent)
             dim(g2, 225, 200)
             heading(g2, "SELECT SAVE", ac, 0.15)
             val lw = min((w * 0.7).toInt(), 700); val lx = (w - lw) / 2; val top = (hh * 0.22).toInt()
@@ -206,7 +206,7 @@ fun main(args: Array<String>) {
             y += rhNew + gp
             if (saves.isEmpty()) txt(g2, "No saves yet  ·  use  Save & Quit  in the pause menu (ESC)", cx, y + hh / 24, Font("SansSerif", Font.ITALIC, hh / 44), Color(170, 165, 140))
             for (s in saves) {
-                val d = LEVELS[s.level.coerceIn(0, LEVELS.size - 1)]; val rc = Rectangle(lx, y, lw, rh)
+                val d = levelDef(s.level); val rc = Rectangle(lx, y, lw, rh)
                 if (rc.y + rc.height >= list.y && rc.y <= list.y + list.height) {
                     card(g2, rc, d, s.info(), Color(200, 195, 165))
                     hitClip(rc, list) { startGame(load = s) }
@@ -226,7 +226,7 @@ fun main(args: Array<String>) {
         }
 
         fun drawMulti(g2: Graphics2D) {
-            val w = width; val hh = height; val cx = w / 2; val ac = Color(LEVELS[0].accent)
+            val w = width; val hh = height; val cx = w / 2; val ac = Color(levelDef(0).accent)
             dim(g2, 225, 200)
             heading(g2, "MULTIPLAYER", ac, 0.17)
             txt(g2, "Type the server address  (host  or  host:port)", cx, (hh * 0.33).toInt(), Font("SansSerif", Font.PLAIN, hh / 40), Color(220, 212, 185))
@@ -245,7 +245,7 @@ fun main(args: Array<String>) {
 
         /** Labelled slider; returns its touch rectangle. ticks = (position 0..1, label, highlighted). */
         fun slider(g2: Graphics2D, title: String, value: String, tl: Int, tr: Int, yTitle: Int, yTrack: Int, frac: Double, ticks: List<Triple<Double, String, Boolean>>): Rectangle {
-            val hh = height; val ac = Color(LEVELS[0].accent)
+            val hh = height; val ac = Color(levelDef(0).accent)
             txt(g2, title, tl, yTitle, spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
             val vf = Font("SansSerif", Font.BOLD, hh / 36)
             txt(g2, value, tr - g2.getFontMetrics(vf).stringWidth(value), yTitle, vf, Color.WHITE, false)
@@ -263,7 +263,7 @@ fun main(args: Array<String>) {
         }
 
         fun drawOptions(g2: Graphics2D) {
-            val w = width; val hh = height; val cx = w / 2; val ac = Color(LEVELS[0].accent)
+            val w = width; val hh = height; val cx = w / 2; val ac = Color(levelDef(0).accent)
             dim(g2, 220, 200)
             heading(g2, "OPTIONS", ac, 0.15)
             val tl = (w * 0.10).toInt(); val tr = (w * 0.55).toInt()
@@ -286,7 +286,7 @@ fun main(args: Array<String>) {
         }
 
         fun drawPause(g2: Graphics2D) {
-            val w = width; val hh = height; val cx = w / 2; val d = LEVELS[g.level]; val ac = Color(d.accent)
+            val w = width; val hh = height; val cx = w / 2; val d = levelDef(g.level); val ac = Color(d.accent)
             dim(g2, 190, 190)
             heading(g2, "PAUSED", ac, 0.21)
             txt(g2, "${d.label}  ·  ${d.name}", cx, (hh * 0.28).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 40), 0.2f), Color(220, 212, 185))
@@ -297,7 +297,7 @@ fun main(args: Array<String>) {
         }
 
         fun drawHud(g2: Graphics2D) {
-            val w = width; val hh = height; val d = LEVELS[g.level]; val ac = Color(d.accent)
+            val w = width; val hh = height; val d = levelDef(g.level); val ac = Color(d.accent)
             val sz = max(12, hh / 44)
             val n = net
             val status = when {

@@ -89,7 +89,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         var side = 0; var n = 0; var cnt = 0; var topBest = Int.MAX_VALUE
         while (n++ < 72) {
             if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
-            if (!isWall(12, mapX, mapY)) continue
+            if (!isWall(LV_CITY, mapX, mapY)) continue
             val ht = City.height(mapX, mapY)
             val pp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
             val lh = (H * vs / pp).toInt().coerceAtLeast(1)
@@ -115,7 +115,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val bottom = hz + lh / 2; val top = bottom - lh * ht
             val y0 = max(0, top); val y1 = min(H - 1, bottom)
             val step = 64.0 / lh; var tpos = (y0 - top) * step
-            val kind = City.kind(mx, my); val vv = (mx * 7 + my * 13) and 3; val unst = unstable(12, mx, my)
+            val kind = City.kind(mx, my); val vv = (mx * 7 + my * 13) and 3; val unst = unstable(LV_CITY, mx, my)
             for (yy in y0..y1) {
                 val tp = tpos.toInt(); tpos += step
                 val unit = tp shr 6 // floors counted from the roof line; the last one is the ground floor
@@ -139,7 +139,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private fun mul2(c: Int, kr: Int, kg: Int, kb: Int) = pack((((c shr 16) and 255) * kr) shr 16, (((c shr 8) and 255) * kg) shr 16, ((c and 255) * kb) shr 16)
 
     private fun flick(lv: Int, kx: Int, ky: Int, t: Double): Double {
-        val v = h(kx, ky, 9 + lv * 13); val th = LEVEL_SPECS[lv].flicker
+        val v = h(kx, ky, 9 + lv * 13); val th = levelSpec(lv).flicker
         return when {
             v < th[0] * 0.4 -> if (sin(t * (6 + v * 20) + v * 50) > 0.5) 0.45 else 1.0 // broken: few, slow, shallow stutter
             v < th[1] -> 0.96 + 0.04 * sin(t * 40)                                    // humming (barely visible)
@@ -226,7 +226,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
 
     fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
-        val lv = g.level; val d = LEVELS[lv]; val ts = TEX[lv]; val tn = d.tint
+        val lv = g.level; val d = levelDef(lv); val ts = texOf(lv); val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
         frame++; lpx = x; lpy = y; lant = d.lantern; pres = g.presence
         val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
@@ -237,20 +237,20 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         val fk = d.fogK * Settings.fogScale // Options > Fog scales every level's own fog
 
         // floor + ceiling (rows are split between threads)
-        if (lv == 12) { // the city: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
+        if (lv == LV_CITY) { // the city: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
             for (xx in 0 until W) colU[xx] = (((atan2(dy + plY * camX[xx], dx + plX * camX[xx]) / (2 * PI)) * 2048).toInt()) and 2047
             for (yy in 0 until min(H, hz + 1)) rowV[yy] = (atan((hz - yy) / (H * vs)) / (PI / 2) * 255).toInt().coerceIn(0, 255)
         }
         par(H) { b, r0, r1 ->
             val lp = bands[b]
-            if (lv == 12) { cityRows(px, lp, r0, r1, hz, vs, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
+            if (lv == LV_CITY) { cityRows(px, lp, r0, r1, hz, vs, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
             for (yy in r0 until r1) {
                 val dr = yy - hz
                 if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
                 val rd = 0.5 * H * vs / abs(dr)
                 val fog = 1.0 / (1 + rd * rd * fk)
                 val isFloor = dr > 0
-                val water = lv == 6 && isFloor
+                val water = lv == LV_SUBLIMITY && isFloor
                 for (xx in 0 until W) {
                     val cx = camX[xx]
                     val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
@@ -268,7 +268,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         // textured walls (DDA; columns are split between threads)
         par(W) { b, c0, c1 ->
             val lp = bands[b]
-            if (lv == 12) { for (xx in c0 until c1) cityCol(px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, fk, gl, t, d); return@par }
+            if (lv == LV_CITY) { for (xx in c0 until c1) cityCol(px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, fk, gl, t, d); return@par }
             for (xx in c0 until c1) {
                 val cx = camX[xx]
                 val rx = dx + plX * cx; val ry = dy + plY * cx
@@ -316,7 +316,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
             items.add(doubleArrayOf(o[0], o[1], 0.0))
         }
-        if (lv == 12) { // street lamps on the lamp lattice (the light pools come from lightAt)
+        if (lv == LV_CITY) { // street lamps on the lamp lattice (the light pools come from lightAt)
             for (ky in floor((y - 14 - 0.5) / 8).toInt()..floor((y + 14 - 0.5) / 8).toInt()) for (kx in floor((x - 14 - 0.5) / 8).toInt()..floor((x + 14 - 0.5) / 8).toInt())
                 if (City.lampOk(kx * 8, ky * 8)) items.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, 9.0))
         }
@@ -398,12 +398,12 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
 
     // ---------- shape-only HUD (text is drawn by each platform) ----------
     private fun drawHud(px: IntArray, g: Game, others: Collection<DoubleArray>) {
-        if (g.showMap && !LEVELS[g.level].isolated) { // no maps on isolated levels
+        if (g.showMap && !levelDef(g.level).isolated) { // no maps on isolated levels
             val R = 8; val cs = 3; val size = (2 * R + 1) * cs
             val ox = W - size - 8; val oy = 8
             val fx = floor(g.x).toInt(); val fy = floor(g.y).toInt()
             rect(px, ox - 2, oy - 2, size + 4, size + 4, pack(0, 0, 0), 150)
-            val ac = LEVELS[g.level].accent
+            val ac = levelDef(g.level).accent
             for (cy in -R..R) for (cx in -R..R)
                 if (isWall(g.level, fx + cx, fy + cy)) rect(px, ox + (cx + R) * cs, oy + (cy + R) * cs, cs, cs, pack((ac shr 16) and 255, (ac shr 8) and 255, ac and 255), 210)
             for (o in others) if (o.size > 2 && o[2].toInt() == g.level && abs(o[0] - g.x) < R && abs(o[1] - g.y) < R)

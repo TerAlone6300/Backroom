@@ -4,9 +4,18 @@ import java.io.*
 import kotlin.math.*
 
 object Progress {
-    val found = BooleanArray(LEVELS.size).also { it[0] = true } // levels discovered (persisted by Store)
-    fun unlock(lv: Int) { if (!found[lv]) { found[lv] = true; Store.saveProfile() } }
+    private val ids: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>().also { it.add(0) } // level numbers discovered (persisted by Store)
+    fun has(lv: Int) = lv in ids
+    fun all(): List<Int> = ids.sorted()
+    fun unlock(lv: Int) { if (levelExists(lv) && ids.add(lv)) Store.saveProfile() }
+    /** Used by Store when loading the profile: no write back. */
+    internal fun load(lv: Int) { if (levelExists(lv)) ids.add(lv) }
+    internal fun reset() { ids.clear(); ids.add(0) }
 }
+
+/** Before level ids became the Backrooms level numbers, files stored positions in this list (0..12); files without "ids=2" are converted with it. */
+private val LEGACY_LEVELS = intArrayOf(0, 1, 2, 3, 4, 5, 37, 6, 75, 139, 182, 201, 11)
+private fun legacyId(old: Int) = LEGACY_LEVELS.getOrElse(old) { 0 }
 
 class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
                val pitch: Double, val stamina: Double, val playSec: Double,
@@ -36,7 +45,8 @@ object Store {
                 p.getProperty("fov")?.toIntOrNull()?.let { Settings.set(it) }
                 p.getProperty("fog")?.toIntOrNull()?.let { Settings.putFog(it) }
                 p.getProperty("diff")?.toIntOrNull()?.let { Settings.putDiff(it) }
-                p.getProperty("found")?.split(",")?.forEach { s -> s.trim().toIntOrNull()?.let { if (it in Progress.found.indices) Progress.found[it] = true } }
+                val legacy = p.getProperty("ids") != "2"
+                p.getProperty("found")?.split(",")?.forEach { s -> s.trim().toIntOrNull()?.let { Progress.load(if (legacy) legacyId(it) else it) } }
             }
         }
     }
@@ -46,7 +56,7 @@ object Store {
         runCatching {
             put(File(d, "profile.properties"), java.util.Properties().apply {
                 setProperty("fov", Settings.fov.toString()); setProperty("fog", Settings.fog.toString()); setProperty("diff", Settings.diff.toString())
-                setProperty("found", Progress.found.indices.filter { Progress.found[it] }.joinToString(","))
+                setProperty("ids", "2"); setProperty("found", Progress.all().joinToString(","))
             })
         }
     }
@@ -56,7 +66,7 @@ object Store {
         return (File(d, "saves").listFiles { f -> f.name.endsWith(".properties") } ?: emptyArray()).mapNotNull { f ->
             runCatching {
                 val p = load(f)
-                SaveData(f.name.removeSuffix(".properties"), p.getProperty("stamp").toLong(), p.getProperty("level").toInt(),
+                SaveData(f.name.removeSuffix(".properties"), p.getProperty("stamp").toLong(), p.getProperty("level").toInt().let { if (p.getProperty("ids") == "2") it else legacyId(it) },
                     p.getProperty("x").toDouble(), p.getProperty("y").toDouble(), p.getProperty("a").toDouble(),
                     p.getProperty("pitch").toDouble(), p.getProperty("stamina").toDouble(), p.getProperty("playSec").toDouble(),
                     p.getProperty("hunger")?.toDouble() ?: 1.0, p.getProperty("rations")?.toInt() ?: 0, p.getProperty("water")?.toInt() ?: 0, p.getProperty("lobbyT")?.toDouble() ?: 0.0)
@@ -68,7 +78,7 @@ object Store {
         val d = dir ?: return
         runCatching {
             put(File(File(d, "saves"), "${s.id}.properties"), java.util.Properties().apply {
-                setProperty("stamp", s.stamp.toString()); setProperty("level", s.level.toString())
+                setProperty("ids", "2"); setProperty("stamp", s.stamp.toString()); setProperty("level", s.level.toString())
                 setProperty("x", s.x.toString()); setProperty("y", s.y.toString()); setProperty("a", s.a.toString())
                 setProperty("pitch", s.pitch.toString()); setProperty("stamina", s.stamina.toString()); setProperty("playSec", s.playSec.toString())
                 setProperty("hunger", s.hunger.toString()); setProperty("rations", s.rations.toString()); setProperty("water", s.water.toString()); setProperty("lobbyT", s.lobbyT.toString())

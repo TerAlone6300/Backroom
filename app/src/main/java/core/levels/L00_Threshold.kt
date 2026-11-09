@@ -1,11 +1,11 @@
 package com.backrooms.game
-// L00_Lobby.kt - Level 0: The Lobby. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
+// L00_Threshold.kt - Level 0: Threshold. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-/** Internal id 0 = Backrooms Level 0, The Lobby. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
-object Level00Lobby : LevelSpec {
-    override val def = LevelDef(0, "LEVEL 0", "THE LOBBY", "Endless yellow rooms. Humming lights. Nobody else can see you.", "NONE", 0, 0, 3, 0.18, 0.40, 0.015, intArrayOf(256, 256, 256), 0xF4E482, isolated = true)
-    override val noclip = intArrayOf(1, 7, 11, 5)
+/** Level 0: Threshold. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
+object Level00Threshold : LevelSpec {
+    override val def = LevelDef(0, "LEVEL 0", "THRESHOLD", "Endless yellow rooms. Humming lights. Nobody else can see you.", "NONE", 0, 0, 3, 0.18, 0.40, 0.015, intArrayOf(256, 256, 256), 0xF4E482, isolated = true, danger = 1)
+    override val noclip = intArrayOf(1, 1, 1, 1)
     override val flicker = doubleArrayOf(0.12, 0.20, 0.27)
 
     override fun wall(x: Int, y: Int): Boolean { // The Lobby: 6x6 rooms, 2-wide doors, pillars

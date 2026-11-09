@@ -11,9 +11,10 @@ class TexSet(fill: (TexSet) -> Unit) {
     init { fill(this) }
 }
 
-val TEX = Array(LEVELS.size) { lv -> TexSet { LEVEL_SPECS[lv].textures(it) } }
+private val TEXTURES: Map<Int, TexSet> = LEVELS.associate { d -> d.id to TexSet { levelSpec(d.id).textures(it) } }
+fun texOf(lv: Int): TexSet = TEXTURES[lv] ?: TEXTURES.getValue(0)
 
-/** Colours and patterns for the data-driven levels (7..12). wp: wall pattern, fp: floor pattern. */
+/** Colours and patterns for the data-driven levels (each passes its own noise seed). wp: wall pattern, fp: floor pattern. */
 class TexSpec(val w: IntArray, val f: IntArray, val c: IntArray, val p: IntArray, val wp: Int, val fp: Int)
 
 /** Fills a texture set from a TexSpec (levels 7 to 12 share this generator; `lv` seeds the noise). */

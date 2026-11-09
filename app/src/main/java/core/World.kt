@@ -33,7 +33,7 @@ private fun hallway(lv: Int, x: Int, y: Int): Int {
 }
 
 private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
-    val sp = LEVEL_SPECS[lv]
+    val sp = levelSpec(lv)
     if (sp.keepsMaze(x, y)) return sp.wall(x, y)
     return when (hallway(lv, x, y)) { 1 -> true; 2 -> false; else -> sp.wall(x, y) }
 }
@@ -60,16 +60,14 @@ private fun chunk(lv: Int, cx: Int, cy: Int): Chunk {
 
 fun isWall(lv: Int, x: Int, y: Int): Boolean = chunk(lv, x shr 5, y shr 5).w[((y and 31) shl 5) or (x and 31)]
 
-/** Each level has exactly 4 not-quite-solid walls at fixed spots; each leads to a fixed level (LevelSpec.noclip). */
-val NOCLIP_TARGETS: List<IntArray> get() = LEVEL_SPECS.map { it.noclip }
-
-val NOCLIPS: List<List<IntArray>> by lazy {
-    LEVELS.indices.map { lv ->
+/** Each level has 4 not-quite-solid walls at fixed spots (none if LevelSpec.noclip is empty); each leads to a fixed level (LevelSpec.noclip). */
+val NOCLIPS: Map<Int, List<IntArray>> by lazy {
+    LEVELS.map { it.id }.associateWith { lv ->
         // Level 0: scattered around the Manila Room. Other levels: around the spawn area.
         val ax = if (lv == 0) Manila.CX + 4 else 4; val ay = if (lv == 0) Manila.CY + 4 else 4
         val out = ArrayList<IntArray>()
         val dists = if (lv == 0) doubleArrayOf(70.0, 115.0, 160.0, 92.0) else doubleArrayOf(18.0, 35.0, 52.0, 27.0)
-        for (k in 0..3) {
+        for (k in levelSpec(lv).noclip.indices) {
             val ang = lv * 1.3 + k * 2.094 + (if (k == 3) 1.047 else 0.0); val dist = dists[k]
             val sx = (ax + cos(ang) * dist).roundToInt(); val sy = (ay + sin(ang) * dist).roundToInt()
             var best: IntArray? = null
@@ -87,7 +85,7 @@ val NOCLIPS: List<List<IntArray>> by lazy {
 }
 
 fun noclipIndex(lv: Int, x: Int, y: Int): Int {
-    val l = NOCLIPS[lv]
+    val l = NOCLIPS[lv] ?: return -1
     for (k in l.indices) if (l[k][0] == x && l[k][1] == y) return k
     return -1
 }
