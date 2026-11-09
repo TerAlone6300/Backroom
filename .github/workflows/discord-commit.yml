@@ -3,7 +3,8 @@ name: Discord Commit Notify
 on:
   push:
     branches:
-      - main, master
+      - main
+      - master
   workflow_call:
     secrets:
       DISCORD_WEBHOOK:
