@@ -49,39 +49,6 @@ private fun hallway(lv: Int, x: Int, y: Int): Int {
     return legacyLevel0Hallway(lv, x, y)
 }
 
-    // Main passage: variable length and width.
-    add(corridorCell(lx, ly, horizontal, start, start + len, center, width))
-
-    // A perpendicular branch creates a T-junction instead of another featureless straight run.
-    if (h(sx, sy, 506 + q) < 0.58) {
-        val wanted = 12 + (h(sx, sy, 507 + q) * 18).toInt()
-        val negativeRoom = center - 8
-        val positiveRoom = SECT - 8 - center
-        val positive = when {
-            positiveRoom < wanted -> false
-            negativeRoom < wanted -> true
-            else -> h(sx, sy, 508 + q) < 0.5
-        }
-        val branchLen = min(wanted, if (positive) positiveRoom else negativeRoom)
-        val branchStart = if (positive) center else center - branchLen
-        val branchEnd = if (positive) center + branchLen else center
-        val branchCenter = start + len / 2
-        val branchWidth = if (h(sx, sy, 509 + q) < 0.72) 3 else 5
-        add(corridorCell(lx, ly, !horizontal, branchStart, branchEnd, branchCenter, branchWidth))
-    }
-
-    // Some passages briefly open into a wider pocket, breaking up the repeated corridor silhouette.
-    if (h(sx, sy, 510 + q) < 0.24) {
-        val middle = start + len / 2
-        add(corridorCell(
-            lx, ly, horizontal,
-            max(start, middle - 4), min(start + len, middle + 4),
-            center, width + 4
-        ))
-    }
-
-    return if (hasFloor) 2 else if (hasWall) 1 else 0
-}
 private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
     val sp = levelSpec(lv)
     if (sp.keepsMaze(x, y)) return sp.wall(x, y)
