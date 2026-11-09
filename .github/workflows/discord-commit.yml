@@ -1,0 +1,86 @@
+name: Discord Commit Notify
+
+on:
+  push:
+    branches:
+      - main
+  workflow_call:
+    secrets:
+      DISCORD_WEBHOOK:
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Send commits to Discord
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+          REPOSITORY: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          # Install jq
+          sudo apt-get update -qq
+          sudo apt-get install -y jq
+
+          # Get all commits from this push (oldest first)
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            COMMITS=$(git rev-list --reverse "$AFTER")
+          else
+            COMMITS=$(git rev-list --reverse "$BEFORE..$AFTER")
+          fi
+
+          # Send each commit as a separate embed
+          while IFS= read -r COMMIT; do
+            [ -z "$COMMIT" ] && continue
+
+            COMMIT_ID=$(git rev-parse --short "$COMMIT")
+            COMMIT_MSG=$(git show -s --format=%B "$COMMIT")
+            COMMIT_AUTHOR=$(git show -s --format=%an "$COMMIT")
+            COMMIT_EMAIL=$(git show -s --format=%ae "$COMMIT")
+            COMMIT_URL="https://github.com/${REPOSITORY}/commit/${COMMIT}"
+            COMMIT_AVATAR="https://github.com/${ACTOR}.png"
+            REPO_URL="https://github.com/${REPOSITORY}"
+
+            # Build Discord embed safely
+            PAYLOAD=$(jq -n \
+              --arg author "$COMMIT_AUTHOR" \
+              --arg avatar "$COMMIT_AVATAR" \
+              --arg title "[${REPOSITORY}:${BRANCH}] New commit" \
+              --arg repo "$REPO_URL" \
+              --arg id "$COMMIT_ID" \
+              --arg url "$COMMIT_URL" \
+              --arg message "$COMMIT_MSG" \
+              --arg color "5763719" \
+              '{
+                embeds: [{
+                  author: {
+                    name: $author,
+                    icon_url: $avatar
+                  },
+                  title: $title,
+                  url: $repo,
+                  description: ("[`" + $id + "`](" + $url + ")\n" + $message),
+                  color: ($color | tonumber)
+                }]
+              }')
+
+            # Send to Discord
+            curl --fail-with-body -sS \
+              -H "Content-Type: application/json" \
+              -X POST \
+              -d "$PAYLOAD" \
+              "$WEBHOOK_URL"
+
+            echo "Sent commit: $COMMIT_ID"
+            sleep 1
+          done <<< "$COMMITS"
