@@ -5,7 +5,7 @@ import kotlin.math.*
 /** Level 0: Threshold. Everything specific to this level lives here: definition, maze, textures, flicker, noclip links. */
 object Level00Threshold : LevelSpec {
     override val def = LevelDef(0, "LEVEL 0", "THRESHOLD", "Endless yellow rooms. Humming lights. Nobody else can see you.", "NONE", 0, 0, 3, 0.18, 0.40, 0.015, intArrayOf(256, 256, 256), 0xF4E482, isolated = true, danger = 1)
-    override val noclip = intArrayOf(1, 1, 1, 1)
+    override val noclip = intArrayOf(1, 1, 1, 1, 1, 1, 1, 1)
     override val flicker = doubleArrayOf(0.12, 0.20, 0.27)
 
     override fun wall(x: Int, y: Int): Boolean { // The Lobby: 6x6 rooms, 2-wide doors, pillars

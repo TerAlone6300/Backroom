@@ -15,23 +15,71 @@ fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     return false
 }
 
-// Every so often a long straight hallway (3 wide, 36-60 cells) is cut through the maze. One candidate per 96x96 sector.
+// Deterministic hallway overlays add varied routes without replacing the underlying room maze.
 private const val SECT = 96
-/** 0 = maze as usual, 1 = hallway side wall, 2 = hallway floor (including a 3-cell opening at each end so it joins the maze). */
-private fun hallway(lv: Int, x: Int, y: Int): Int {
-    val sx = Math.floorDiv(x, SECT); val sy = Math.floorDiv(y, SECT); val q = lv * 7
-    if (h(sx, sy, 500 + q) > 0.38) return 0
-    val horiz = h(sx, sy, 501 + q) < 0.5
-    val len = 36 + (h(sx, sy, 502 + q) * 25).toInt()
-    val a0 = 6 + (h(sx, sy, 503 + q) * (SECT - len - 12)).toInt() // start along the hallway
-    val p0 = 6 + (h(sx, sy, 504 + q) * (SECT - 18)).toInt()       // first side wall across it
-    val lx = Math.floorMod(x, SECT); val ly = Math.floorMod(y, SECT)
-    val u = if (horiz) lx else ly; val v = if (horiz) ly else lx
-    if (v < p0 || v > p0 + 4 || u < a0 - 3 || u >= a0 + len + 3) return 0
-    if (v == p0 || v == p0 + 4) return if (u in a0 until a0 + len) 1 else 0
-    return 2
+/** 0 = maze, 1 = corridor wall, 2 = corridor floor. */
+private fun corridorCell(
+    x: Int, y: Int, horizontal: Boolean,
+    start: Int, end: Int, center: Int, width: Int
+): Int {
+    val along = if (horizontal) x else y
+    val across = if (horizontal) y else x
+    val half = width / 2
+    if (along !in start..end || across < center - half - 1 || across > center + half + 1) return 0
+    return if (across == center - half - 1 || across == center + half + 1) 1 else 2
 }
 
+private fun hallway(lv: Int, x: Int, y: Int): Int {
+    val sx = Math.floorDiv(x, SECT); val sy = Math.floorDiv(y, SECT); val q = lv * 7
+    if (h(sx, sy, 500 + q) > 0.44) return 0
+
+    val horizontal = h(sx, sy, 501 + q) < 0.5
+    val widthRoll = h(sx, sy, 502 + q)
+    val width = if (widthRoll < 0.58) 3 else if (widthRoll < 0.88) 5 else 7
+    val len = 22 + (h(sx, sy, 503 + q) * 31).toInt()
+    val start = 8 + (h(sx, sy, 504 + q) * (SECT - len - 16)).toInt()
+    val center = 18 + (h(sx, sy, 505 + q) * (SECT - 36)).toInt()
+    val lx = Math.floorMod(x, SECT); val ly = Math.floorMod(y, SECT)
+
+    var hasFloor = false
+    var hasWall = false
+    fun add(cell: Int) {
+        if (cell == 2) hasFloor = true else if (cell == 1) hasWall = true
+    }
+
+    // Main passage: variable length and width.
+    add(corridorCell(lx, ly, horizontal, start, start + len, center, width))
+
+    // A perpendicular branch creates a T-junction instead of another featureless straight run.
+    if (h(sx, sy, 506 + q) < 0.58) {
+        val wanted = 12 + (h(sx, sy, 507 + q) * 18).toInt()
+        val negativeRoom = center - 8
+        val positiveRoom = SECT - 8 - center
+        val positive = when {
+            positiveRoom < wanted -> false
+            negativeRoom < wanted -> true
+            else -> h(sx, sy, 508 + q) < 0.5
+        }
+        val branchLen = min(wanted, if (positive) positiveRoom else negativeRoom)
+        val branchStart = if (positive) center else center - branchLen
+        val branchEnd = if (positive) center + branchLen else center
+        val branchCenter = start + len / 2
+        val branchWidth = if (h(sx, sy, 509 + q) < 0.72) 3 else 5
+        add(corridorCell(lx, ly, !horizontal, branchStart, branchEnd, branchCenter, branchWidth))
+    }
+
+    // Some passages briefly open into a wider pocket, breaking up the repeated corridor silhouette.
+    if (h(sx, sy, 510 + q) < 0.24) {
+        val middle = start + len / 2
+        add(corridorCell(
+            lx, ly, horizontal,
+            max(start, middle - 4), min(start + len, middle + 4),
+            center, width + 4
+        ))
+    }
+
+    return if (hasFloor) 2 else if (hasWall) 1 else 0
+}
 private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
     val sp = levelSpec(lv)
     if (sp.keepsMaze(x, y)) return sp.wall(x, y)
@@ -66,9 +114,12 @@ val NOCLIPS: Map<Int, List<IntArray>> by lazy {
         // Level 0: scattered around the Manila Room. Other levels: around the spawn area.
         val ax = if (lv == 0) Manila.CX + 4 else 4; val ay = if (lv == 0) Manila.CY + 4 else 4
         val out = ArrayList<IntArray>()
-        val dists = if (lv == 0) doubleArrayOf(70.0, 115.0, 160.0, 92.0) else doubleArrayOf(18.0, 35.0, 52.0, 27.0)
+        val dists = if (lv == 0) doubleArrayOf(58.0, 92.0, 126.0, 160.0, 74.0, 108.0, 142.0, 176.0)
+                    else doubleArrayOf(18.0, 35.0, 52.0, 27.0)
         for (k in levelSpec(lv).noclip.indices) {
-            val ang = lv * 1.3 + k * 2.094 + (if (k == 3) 1.047 else 0.0); val dist = dists[k]
+            val step = if (lv == 0) (2.0 * Math.PI / 8.0) else 2.094
+            val ang = lv * 1.3 + k * step + (if (lv != 0 && k == 3) 1.047 else 0.0)
+            val dist = dists[k]
             val sx = (ax + cos(ang) * dist).roundToInt(); val sy = (ay + sin(ang) * dist).roundToInt()
             var best: IntArray? = null
             search@ for (r in 0..40) for (dy in -r..r) for (dx in -r..r) {
