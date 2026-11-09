@@ -29,23 +29,25 @@ private fun corridorCell(
     return if (across == center - half - 1 || across == center + half + 1) 1 else 2
 }
 
+private const val LEGACY_SECT = 96
+
+private fun legacyLevel0Hallway(lv: Int, x: Int, y: Int): Int {
+    val sx = Math.floorDiv(x, LEGACY_SECT); val sy = Math.floorDiv(y, LEGACY_SECT); val q = lv * 7
+    if (h(sx, sy, 500 + q) > 0.38) return 0
+    val horiz = h(sx, sy, 501 + q) < 0.5
+    val len = 36 + (h(sx, sy, 502 + q) * 25).toInt()
+    val a0 = 6 + (h(sx, sy, 503 + q) * (LEGACY_SECT - len - 12)).toInt() // start along the hallway
+    val p0 = 6 + (h(sx, sy, 504 + q) * (LEGACY_SECT - 18)).toInt()       // first side wall across it
+    val lx = Math.floorMod(x, LEGACY_SECT); val ly = Math.floorMod(y, LEGACY_SECT)
+    val u = if (horiz) lx else ly; val v = if (horiz) ly else lx
+    if (v < p0 || v > p0 + 4 || u < a0 - 3 || u >= a0 + len + 3) return 0
+    if (v == p0 || v == p0 + 4) return if (u in a0 until a0 + len) 1 else 0
+    return 2
+}
+
 private fun hallway(lv: Int, x: Int, y: Int): Int {
-    val sx = Math.floorDiv(x, SECT); val sy = Math.floorDiv(y, SECT); val q = lv * 7
-    if (h(sx, sy, 500 + q) > 0.44) return 0
-
-    val horizontal = h(sx, sy, 501 + q) < 0.5
-    val widthRoll = h(sx, sy, 502 + q)
-    val width = if (widthRoll < 0.58) 3 else if (widthRoll < 0.88) 5 else 7
-    val len = 22 + (h(sx, sy, 503 + q) * 31).toInt()
-    val start = 8 + (h(sx, sy, 504 + q) * (SECT - len - 16)).toInt()
-    val center = 18 + (h(sx, sy, 505 + q) * (SECT - 36)).toInt()
-    val lx = Math.floorMod(x, SECT); val ly = Math.floorMod(y, SECT)
-
-    var hasFloor = false
-    var hasWall = false
-    fun add(cell: Int) {
-        if (cell == 2) hasFloor = true else if (cell == 1) hasWall = true
-    }
+    return legacyLevel0Hallway(lv, x, y)
+}
 
     // Main passage: variable length and width.
     add(corridorCell(lx, ly, horizontal, start, start + len, center, width))
