@@ -366,14 +366,15 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         nextFog = drawSlider(c, "FOG", Settings.fogName(), tl, tr, h * 0.56f, h * 0.64f, Settings.fog / 100f,
             Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100f, nm, Settings.fog == f) })
         // difficulty
-        val dl = w * 0.64f; val dr = w * 0.92f; val bh = 26 * dp; val gp = 5 * dp; var y = h * 0.34f
+        val dl = w * 0.64f; val dr = w * 0.92f; val bh = 22 * dp; val gp = 4 * dp; var y = h * 0.34f
         small(c, "DIFFICULTY", dl, h * 0.30f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
-        val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55), Color.rgb(110, 210, 200))
+        val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55), Color.rgb(110, 210, 200), Color.rgb(200, 30, 30))
         for (i in DIFFS.indices) {
-            btn(c, RectF(dl, y, dr, y + bh), DIFFS[i].name.uppercase(), Settings.diff == i, cols[i]) { Settings.putDiff(i); Store.saveProfile() }
+            val rc = RectF(dl, y, dr, y + bh); val lock = playing && (g.hardcoreRun || DIFFS[i].hardcore) // a run in progress keeps its difficulty; Hardcore cannot be switched on mid-run
+            if (lock) button(c, rc, DIFFS[i].name.uppercase(), Settings.diff == i, Color.rgb(100, 100, 100)) else btn(c, rc, DIFFS[i].name.uppercase(), Settings.diff == i, cols[i]) { Settings.putDiff(i); Store.saveProfile() }
             y += bh + gp
         }
-        small(c, DIFFS[Settings.diff].blurb, dl, y + 8 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
+        small(c, if (playing && g.hardcoreRun) "Hardcore run: difficulty is locked." else DIFFS[Settings.diff].blurb, dl, y + 8 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
         btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
     }
 
@@ -423,7 +424,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             n.state == 1 -> "ONLINE · ${n.others.size + 1} PLAYERS${if (g.isolated()) " · ISOLATED" else ""}"; else -> "CONNECTION LOST"
         }
         pText.textSize = 10.5f * dp; pText.color = Color.rgb(225, 215, 180); c.drawText(status, 26 * dp, 50 * dp, pText)
-        pText.textSize = 9.5f * dp; pText.color = Color.rgb(160, 155, 130); c.drawText("${fps.toInt()} FPS" + (if (Settings.explore) "  ·  EXPLORE" else ""), 26 * dp, 66 * dp, pText)
+        pText.textSize = 9.5f * dp; pText.color = Color.rgb(160, 155, 130); c.drawText("${fps.toInt()} FPS" + Settings.modeTag(), 26 * dp, 66 * dp, pText)
 
         if (!Settings.explore) { // food bar (blinks red when low); Explore has no hunger
         val low = g.hunger < 0.2

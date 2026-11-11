@@ -26,6 +26,8 @@ class Game {
     private var scanX = Int.MIN_VALUE; private var scanY = 0
     private class Origin(val level: Int, val x: Double, val y: Double, val a: Double, val pitch: Double, val ents: List<Entity>)
     private var origin: Origin? = null          // Level 139: the dangerous situation you were pulled out of
+    @Volatile var hardcoreRun = false        // this run is Hardcore: the difficulty is locked and death leads to The Grave
+    private var warnGrave = false
     private var grace = 0.0                      // seconds after returning from the trial in which nothing can catch you
     private var trialT = 0.0; private var warnTrial = false; private var warnReworked = false
     private var warnHungry = false; private var warnHallu = false; private var warnJerry = false
@@ -37,7 +39,7 @@ class Game {
     /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
     private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
-    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false }
+    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false; warnGrave = false }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
     private fun rescan(cx: Int, cy: Int) {
         scanX = cx; scanY = cy
@@ -167,15 +169,16 @@ class Game {
         return true
     }
 
-    fun newGame(lv: Int = 0) { playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
+    fun newGame(lv: Int = 0) { hardcoreRun = Settings.hardcore; playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
 
-    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT)
+    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT, hardcoreRun)
 
     /** Resume a save: same level and spot; entities start fresh, 11+ cells away. */
     fun restore(s: SaveData) {
         level = if (levelExists(s.level)) s.level else 0; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
         arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
         a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
+        hardcoreRun = s.hardcore; if (hardcoreRun) Settings.putDiff(HARDCORE_IDX) else if (Settings.hardcore) Settings.putDiff(NIGHTMARE_IDX) // a save carries its mode
         resetLevelState(); hunger = s.hunger.coerceIn(0.0, 1.0); rations = s.rations.coerceIn(0, 9); water = s.water.coerceIn(0, 9); lobbyT = s.lobbyT.coerceAtLeast(0.0); starveT = 0.0
         remember(level)
         val p = findFree(s.x, s.y); x = p.first; y = p.second
@@ -198,7 +201,7 @@ class Game {
         val moving = len > 0.1
         val run = sprint && moving && !exhausted
         // food: full to empty in about 18 minutes of walking; hungry = slower recovery, starving = slower and, eventually, fatal. Explore has no hunger (stamina still applies).
-        if (dif.explore) hunger = 1.0 else hunger = max(0.0, hunger - (0.0009 + (if (run) 0.0012 else 0.0)) * dif.hunger * dt)
+        if (dif.explore || level == LV_GRAVE) hunger = 1.0 else hunger = max(0.0, hunger - (0.0009 + (if (run) 0.0012 else 0.0)) * dif.hunger * dt)
         starveT = if (hunger <= 0.0) starveT + dt else 0.0
         if (starveT > 75) { dead = true; deadT = 0.0; deathMsg = "YOU STARVED"; return }
         if (hunger < 0.2 && !warnHungry) { warnHungry = true; say("YOU ARE HUNGRY  ·  find food") } else if (hunger > 0.4) warnHungry = false
@@ -234,6 +237,7 @@ class Game {
         if (halluc > 0.08 && !warnHallu) { warnHallu = true; say("YOUR EYES PLAY TRICKS  ·  almond water or the Manila Room helps") } else if (halluc < 0.02) warnHallu = false
         updateGhosts(dt)
         updateRooms(dt)
+        if (level == LV_GRAVE && !warnGrave && levelT > 9.0) { warnGrave = true; say("RESTS HERE THE CHAMPION  ·  HIS WORK IS DONE  ·  YOU ARE SAVED") }
         if (level == LV_WARRIOR) updateTrial(dt)
 
         var dg = 0.0; var pr = 0.0
@@ -330,6 +334,7 @@ class Game {
 
     /** After the death animation: the trial pulls you out of danger on Class 3+ levels (sometimes), or you simply start over. */
     private fun afterDeath() {
+        if (hardcoreRun && level != LV_GRAVE) { origin = null; enter(LV_GRAVE, "YOU DIED"); return } // one life: the Grave has no exit
         if (level == LV_WARRIOR) { returnFromTrial("YOU FAILED THE TRIAL"); return }
         if (!Settings.explore && levelDef(level).danger >= 3 && Math.random() < 0.4) { enterTrial(); return }
         hunger = max(hunger, 0.5); starveT = 0.0; enter(level)
@@ -352,7 +357,7 @@ class Game {
     /** The lake in the crater: a random safe level, usually Level 1 or Level 11. */
     private fun completeTrial() {
         origin = null
-        val safe = LEVELS.filter { it.safe && it.id != LV_WARRIOR }.map { it.id }
+        val safe = LEVELS.filter { it.safe && !it.unlisted && it.id != LV_WARRIOR }.map { it.id }
         val r = Math.random()
         val dest = if (r < 0.45) 1 else if (r < 0.90) LV_CITY else safe[(Math.random() * safe.size).toInt()]
         enter(dest, "YOU PASSED THE TRIAL")

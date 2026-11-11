@@ -9,7 +9,7 @@ class LevelDef(val id: Int, val label: String, val name: String, val blurb: Stri
                val period: Int, val ambient: Double, val falloff: Double, val fogK: Double, val tint: IntArray, val accent: Int,
                val lantern: Double = 0.0, val isolated: Boolean = false,
                val calm: Double = 1.0, val cast: IntArray = intArrayOf(),
-               val safe: Boolean = false, val lamp0: Double = 1.5, val danger: Int = 1) { // danger: Backrooms survival difficulty class (3+ can drag you into Level 139); lamp0: where the lamp lattice starts; safe: rated Safe & Secure (Explore noclips favour these); calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
+               val safe: Boolean = false, val lamp0: Double = 1.5, val danger: Int = 1, val unlisted: Boolean = false) { // unlisted: never unlocked, never a destination (the Grave) // danger: Backrooms survival difficulty class (3+ can drag you into Level 139); lamp0: where the lamp lattice starts; safe: rated Safe & Secure (Explore noclips favour these); calm: Level 11 Effect (hostiles notice you less); cast: entity types spawned (empty = eCount x eType)
     val ip = 1.0 / period
 }
 
@@ -35,10 +35,10 @@ interface LevelSpec {
     fun darkness(x: Int, y: Int): Double = 1.0
 }
 
-/** Level numbers are the Backrooms Wikidot numbers: the id of a level IS its number (0 1 2 3 4 5 6 11 37 75 139 182 201), in this order. */
+/** Level numbers are the Backrooms Wikidot numbers (the one unnumbered level, The Grave, is -1): the id of a level IS its number (0 1 2 3 4 5 6 11 37 75 139 182 201), in this order. */
 val LEVEL_SPECS: List<LevelSpec> = listOf(
     Level00Threshold, Level01HabitableZone, Level02AbandonedUtilityHalls, Level03ElectricalStation, Level04AbandonedOffice, Level05TerrorHotel, Level06LightsOut,
-    Level11TheCity, Level37Sublimity, Level75Liminality, Level139WarriorsTrial, Level182CityOfDusk, Level201Threshold)
+    Level11TheCity, Level37Sublimity, Level75Liminality, Level139WarriorsTrial, Level182CityOfDusk, Level201Threshold, LevelUnnumberedGrave)
 
 val LEVELS: List<LevelDef> = LEVEL_SPECS.map { it.def }
 private val SPECS_BY_ID: Map<Int, LevelSpec> = LEVEL_SPECS.associateBy { it.def.id }

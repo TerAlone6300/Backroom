@@ -19,6 +19,9 @@ object Settings {
         return FOG_PRESETS.firstOrNull { abs(it.first - f) <= 3 }?.first ?: f
     }
     val explore get() = DIFFS[diff].explore
+    val hardcore get() = DIFFS[diff].hardcore
+    /** Tag shown next to the FPS counter. */
+    fun modeTag() = if (explore) "  ·  EXPLORE" else if (hardcore) "  ·  HARDCORE" else ""
     fun putDiff(i: Int) { diff = i.coerceIn(0, DIFFS.size - 1) }
     val PRESETS = listOf(30 to "Narrow", 60 to "Normal", 110 to "Quake Pro")
     fun set(f: Int) { fov = f.coerceIn(FOV_MIN, FOV_MAX) }
@@ -34,7 +37,7 @@ object Settings {
 /** Difficulty multipliers (Normal = the original game): entity count, entity speed, how far entities notice you,
  *  sprint drain / refill, spawn distance, catch distance, hunger rate, starting rations / almond water. */
 class Diff(val name: String, val blurb: String, val count: Double, val speed: Double, val sight: Double, val drain: Double,
-           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double, val kitRations: Int = 2, val kitWater: Int = 1, val explore: Boolean = false)
+           val regen: Double, val spawn: Double, val catchR: Double, val hunger: Double, val kitRations: Int = 2, val kitWater: Int = 1, val explore: Boolean = false, val hardcore: Boolean = false)
 /** Explore mode knobs: everything to tune after player feedback is in this one place. */
 object ExploreRules {
     /** false = levels you pass through are NOT remembered (they never reach the unlocked-levels drawer). true = remembered like in the other modes. */
@@ -48,4 +51,8 @@ val DIFFS = listOf(
     Diff("Normal", "The intended experience.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 1.0, 2, 1),
     Diff("Hard", "More, faster entities. Shorter sprint.", 1.5, 1.15, 1.2, 1.3, 0.85, 0.85, 0.65, 1.25, 1, 1),
     Diff("Nightmare", "A horde, faster than your sprint.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6, 1, 0),
-    Diff("Explore", "Friendly monsters. Safe levels.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.6, 0, 0, explore = true))
+    Diff("Explore", "Friendly monsters. Safe levels.", 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.6, 0.6, 0, 0, explore = true),
+    // Nightmare numbers, one life: the difficulty is locked for the whole run and death leads to The Grave (Unnumbered Level), which has no exit
+    Diff("Hardcore", "Nightmare, one life. Death leads to The Grave.", 2.0, 1.3, 1.5, 1.6, 0.7, 0.7, 0.7, 1.6, 1, 0, hardcore = true))
+val HARDCORE_IDX = DIFFS.indexOfFirst { it.hardcore }
+val NIGHTMARE_IDX = DIFFS.indexOfFirst { it.name == "Nightmare" }

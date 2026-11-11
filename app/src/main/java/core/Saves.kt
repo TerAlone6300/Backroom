@@ -7,7 +7,7 @@ object Progress {
     private val ids: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>().also { it.add(0) } // level numbers discovered (persisted by Store)
     fun has(lv: Int) = lv in ids
     fun all(): List<Int> = ids.sorted()
-    fun unlock(lv: Int) { if (levelExists(lv) && ids.add(lv)) Store.saveProfile() }
+    fun unlock(lv: Int) { if (levelExists(lv) && !levelDef(lv).unlisted && ids.add(lv)) Store.saveProfile() }
     /** Used by Store when loading the profile: no write back. */
     internal fun load(lv: Int) { if (levelExists(lv)) ids.add(lv) }
     internal fun reset() { ids.clear(); ids.add(0) }
@@ -19,7 +19,7 @@ private fun legacyId(old: Int) = LEGACY_LEVELS.getOrElse(old) { 0 }
 
 class SaveData(val id: String, val stamp: Long, val level: Int, val x: Double, val y: Double, val a: Double,
                val pitch: Double, val stamina: Double, val playSec: Double,
-               val hunger: Double = 1.0, val rations: Int = 0, val water: Int = 0, val lobbyT: Double = 0.0) {
+               val hunger: Double = 1.0, val rations: Int = 0, val water: Int = 0, val lobbyT: Double = 0.0, val hardcore: Boolean = false) {
     fun info(): String {
         val m = (playSec / 60).toInt()
         val t = if (m < 1) "<1 min" else if (m < 60) "$m min" else "${m / 60}h ${"%02d".format(m % 60)}m"
@@ -69,7 +69,7 @@ object Store {
                 SaveData(f.name.removeSuffix(".properties"), p.getProperty("stamp").toLong(), p.getProperty("level").toInt().let { if (p.getProperty("ids") == "2") it else legacyId(it) },
                     p.getProperty("x").toDouble(), p.getProperty("y").toDouble(), p.getProperty("a").toDouble(),
                     p.getProperty("pitch").toDouble(), p.getProperty("stamina").toDouble(), p.getProperty("playSec").toDouble(),
-                    p.getProperty("hunger")?.toDouble() ?: 1.0, p.getProperty("rations")?.toInt() ?: 0, p.getProperty("water")?.toInt() ?: 0, p.getProperty("lobbyT")?.toDouble() ?: 0.0)
+                    p.getProperty("hunger")?.toDouble() ?: 1.0, p.getProperty("rations")?.toInt() ?: 0, p.getProperty("water")?.toInt() ?: 0, p.getProperty("lobbyT")?.toDouble() ?: 0.0, p.getProperty("hardcore") == "1")
             }.getOrNull()
         }.sortedByDescending { it.stamp }
     }
@@ -81,7 +81,7 @@ object Store {
                 setProperty("ids", "2"); setProperty("stamp", s.stamp.toString()); setProperty("level", s.level.toString())
                 setProperty("x", s.x.toString()); setProperty("y", s.y.toString()); setProperty("a", s.a.toString())
                 setProperty("pitch", s.pitch.toString()); setProperty("stamina", s.stamina.toString()); setProperty("playSec", s.playSec.toString())
-                setProperty("hunger", s.hunger.toString()); setProperty("rations", s.rations.toString()); setProperty("water", s.water.toString()); setProperty("lobbyT", s.lobbyT.toString())
+                setProperty("hunger", s.hunger.toString()); setProperty("rations", s.rations.toString()); setProperty("water", s.water.toString()); setProperty("lobbyT", s.lobbyT.toString()); setProperty("hardcore", if (s.hardcore) "1" else "0")
             })
         }
     }

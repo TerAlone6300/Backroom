@@ -48,13 +48,13 @@ fun noclipDest(lv: Int, k: Int): Int {
     if (dest.isEmpty()) return lv
     val fixed = dest[k]
     if (!Settings.explore || Math.random() >= ExploreRules.SAFE_NOCLIP_CHANCE) return fixed
-    val safe = LEVELS.filter { it.safe && it.id != lv }.map { it.id }
+    val safe = LEVELS.filter { it.safe && !it.unlisted && it.id != lv }.map { it.id }
     return if (safe.isEmpty()) fixed else safe[(Math.random() * safe.size).toInt()]
 }
 
 /** Supplies are scattered through every level from 1 up. Level 0 keeps them all inside the Manila Room. */
 fun supplyAt(lv: Int, x: Int, y: Int): Int {
-    if (Settings.explore) return 0 // no hunger in Explore, so no supplies
+    if (Settings.explore || lv == LV_GRAVE) return 0 // no hunger in Explore, so no supplies
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
     if (lv == LV_CITY && City.cacheCell(x, y)) return if (h(x, y, 191) >= 0.22) 0 else if (h(x, y, 881) < 0.4) 2 else 1 // stocked building
