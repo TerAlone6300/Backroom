@@ -6,6 +6,7 @@ import kotlin.math.*
 object Level11TheCity : LevelSpec {
     override val def = LevelDef(11, "LEVEL 11", "THE CITY THAT NEVER SLEEPS", "Endless streets, lit windows. Hostile things keep their distance.", "SMILERS · HOUNDS · FACELINGS", 4, 8, 8, 0.27, 0.15, 0.0012, intArrayOf(240, 238, 256), 0xFFC857,
         calm = 0.45, cast = intArrayOf(4, 1, 4, 2, 1, 4, 1, 2), safe = true, lamp0 = 0.5, danger = 2) // 3 Facelings, 3 Hounds, 2 Smilers (scaled by difficulty)
+    override val world: OpenWorld? = City
     override val noclip = intArrayOf(1, 3, 4, 37)
     override val flicker = doubleArrayOf(0.02, 0.05, 0.06)
     private val SPEC = TexSpec(intArrayOf(104, 100, 114), intArrayOf(58, 58, 64), intArrayOf(16, 20, 40), intArrayOf(255, 236, 170), 0, 0)
@@ -20,7 +21,7 @@ object Level11TheCity : LevelSpec {
 /** An open night-time city, no ceiling. 16x16 blocks, 6-wide streets (sidewalk, four lanes, sidewalk) with open crossings.
  *  Lots hold towers of 2..10 floors (a third solid, the rest hollow shells with a door), parks with trees, squares with a monument.
  *  Above: a star sky with a moon, clouds lit from below and a far skyline that goes on for ever. */
-object City {
+object City : OpenWorld {
     private fun vn(x: Double, y: Double, s: Int, wrap: Int): Double { // smooth value noise, tiles every `wrap` cells along x
         val xi = floor(x).toInt(); val yi = floor(y).toInt(); val fx = x - xi; val fy = y - yi
         val x0 = Math.floorMod(xi, wrap); val x1 = Math.floorMod(xi + 1, wrap)
@@ -49,7 +50,7 @@ object City {
     }
 
     /** Floors (wall units) of the wall cell: trees 2, monuments 3, buildings 2..3 low-rise, 4..6 mid, 7..10 towers. */
-    fun height(x: Int, y: Int): Int {
+    override fun height(x: Int, y: Int): Int {
         val bx = x shr 4; val by = y shr 4; val k = h(bx, by, 150)
         if (k < 0.07) return 2
         if (k < 0.14) return 3
@@ -116,7 +117,7 @@ object City {
     fun lampOk(ix: Int, iy: Int) = ((ix and 15) < 6 || (iy and 15) < 6) && !isWall(LV_CITY, ix, iy)
 
     /** Ground colour at (wx, wy): asphalt with lane lines and zebra crossings, sidewalks, park grass, plaza tiles, lot pavement. `base` = asphalt grain. */
-    fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int {
+    override fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int {
         val lx = ix and 15; val ly = iy and 15; val fx = wx - ix; val fy = wy - iy
         val n = 0.85 + 0.3 * ((base and 255) / 255.0)
         val inV = lx < 6; val inH = ly < 6
@@ -182,7 +183,9 @@ object City {
         return t
     }
 
-    val tex: Array<IntArray> by lazy {
+    override val haze = pack(100, 62, 90) // horizon glow, matching the sky
+    override val hazeK = 0.0007
+    override val tex: Array<IntArray> by lazy {
         Array(19) { i ->
             when {
                 i < 12 -> facade(i / 4, i % 4)
@@ -204,7 +207,7 @@ object City {
     }
 
     /** 2048 x 256 panorama: azimuth around, elevation 0..90 degrees upward. */
-    val sky: IntArray by lazy {
+    override val sky: IntArray by lazy {
         val w = 2048; val hh = 256; val s = IntArray(w * hh)
         for (v in 0 until hh) {
             val e = v / 255.0; val glow = max(0.0, 1.0 - e / 0.30).let { it * it } // city light pollution near the horizon
@@ -240,6 +243,17 @@ object City {
         layer(300, 4, 15, 8, 26, pack(46, 36, 64), pack(190, 150, 110), 0.30)  // far, hazy
         layer(320, 3, 22, 14, 40, pack(14, 14, 26), pack(255, 214, 130), 0.28) // near, dark
         s
+    }
+
+    override fun style(x: Int, y: Int) = kind(x, y) * 4 + ((x * 7 + y * 13) and 3)
+    override fun texIndex(style: Int, unit: Int, ht: Int): Int {
+        val kind = style shr 2; val vv = style and 3
+        return if (kind == 4) 18 else if (kind == 3) (if (unit >= ht - 1) 13 else 12) else if (unit >= ht - 1) 14 + vv else kind * 4 + ((vv + unit) and 3)
+    }
+    override fun dim(x: Int, y: Int) = if (darkCell(x, y)) 0.12 else 1.0
+    override fun extraSprites(x: Double, y: Double, out: MutableList<DoubleArray>) { // street lamps on the lamp lattice (the light pools come from lightAt)
+        for (ky in floor((y - 14 - 0.5) / 8).toInt()..floor((y + 14 - 0.5) / 8).toInt()) for (kx in floor((x - 14 - 0.5) / 8).toInt()..floor((x + 14 - 0.5) / 8).toInt())
+            if (lampOk(kx * 8, ky * 8)) out.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, S_LAMP.toDouble()))
     }
 
     fun warm() { tex; sky } // build the textures and the sky now (called when the level starts)

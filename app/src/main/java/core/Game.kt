@@ -24,6 +24,10 @@ class Game {
     @Volatile var supplies: List<Supply> = emptyList()
     private val taken = HashSet<Long>()
     private var scanX = Int.MIN_VALUE; private var scanY = 0
+    private class Origin(val level: Int, val x: Double, val y: Double, val a: Double, val pitch: Double, val ents: List<Entity>)
+    private var origin: Origin? = null          // Level 139: the dangerous situation you were pulled out of
+    private var grace = 0.0                      // seconds after returning from the trial in which nothing can catch you
+    private var trialT = 0.0; private var warnTrial = false; private var warnReworked = false
     private var warnHungry = false; private var warnHallu = false; private var warnJerry = false
     private val roomsDone = HashSet<Long>(); private var roomT = 0.0
     var notice = ""; @Volatile var noticeT = 0.0; var deathMsg = "YOU WERE CAUGHT"
@@ -33,7 +37,7 @@ class Game {
     /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
     private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
-    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0 }
+    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
     private fun rescan(cx: Int, cy: Int) {
         scanX = cx; scanY = cy
@@ -65,11 +69,13 @@ class Game {
         remember(lv)
         // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
         // Other levels drop you near the origin so players can regroup.
-        val p = if (lv == 0) { val ang0 = Math.random() * 6.283; val d0 = 60 + Math.random() * 200
+        val sp = levelSpec(lv).spawn
+        val p = if (sp != null) findFree(sp[0], sp[1]) else if (lv == 0) { val ang0 = Math.random() * 6.283; val d0 = 60 + Math.random() * 200
                                findFree(Manila.CX + 4.5 + cos(ang0) * d0, Manila.CY + 4.5 + sin(ang0) * d0) }
                 else findFree(4 + Math.random() * 3, 4 + Math.random() * 3)
         x = p.first; y = p.second
         spawnEntities()
+        if (lv == LV_WARRIOR) spawnTrial()
     }
 
     private fun spawnEntities() {
@@ -179,7 +185,8 @@ class Game {
     /** fwd/str in -1..1 (analog), turn in rad/s */
     fun update(dt: Double, fwd: Double, str: Double, turn: Double, sprint: Boolean) {
         levelT += dt; playSec += dt; flash = max(0.0, flash - dt / 1.2); noticeT = max(0.0, noticeT - dt)
-        if (dead) { deadT += dt; if (deadT > 3.5) { hunger = max(hunger, 0.5); starveT = 0.0; enter(level) }; return }
+        grace = max(0.0, grace - dt)
+        if (dead) { deadT += dt; if (deadT > 3.5) afterDeath(); return }
         val dif = DIFFS[Settings.diff]
         if (eatReq) { eatReq = false; if (rations > 0) { rations--; hunger = min(1.0, hunger + 0.35); say("YOU ATE A RATION") } }
         if (drinkReq) { drinkReq = false; if (water > 0) { water--; hunger = min(1.0, hunger + 0.08); lobbyT = 0.0; halluc = 0.0; ghosts.clear(); say("ALMOND WATER  ·  your head clears") } }
@@ -227,6 +234,7 @@ class Game {
         if (halluc > 0.08 && !warnHallu) { warnHallu = true; say("YOUR EYES PLAY TRICKS  ·  almond water or the Manila Room helps") } else if (halluc < 0.02) warnHallu = false
         updateGhosts(dt)
         updateRooms(dt)
+        if (level == LV_WARRIOR) updateTrial(dt)
 
         var dg = 0.0; var pr = 0.0
         val cityFx = levelDef(level).calm < 1.0 // Level 11 Effect
@@ -287,6 +295,15 @@ class Game {
                 if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
                 if (e.chase) dg = max(dg, 1 - d / 14)
+            } else if (e.type == E_TARANTULA) { // Tarantula: lurks in the cave and hunts whatever comes in
+                if (d < 9 * sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 14 * sight) e.chase = false
+                if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 3
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 2.7 else 0.8) * dif.speed * dt)
+                if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
+                e.x = r.first; e.y = r.second
+                if (e.chase) dg = max(dg, 1 - d / 9)
+            } else if (e.type == E_WARRIOR) { // The Warrior stands at the foot of the volcano and watches
+                if (d < 9 && !warnTrial) { warnTrial = true; say("THE WARRIOR  ·  FACE YOUR FEAR") }
             } else if (e.type == E_JERRY) { // Jerry sits in his room and watches; the cult around him chants
                 if (d < 7 && !warnJerry) { warnJerry = true; say("JERRY AND HIS CULT") }
             } else if (e.type == E_CULTIST) {
@@ -297,7 +314,7 @@ class Game {
                 if (!seen) { e.x += ex / d * 1.9 * dif.speed * dt; e.y += ey / d * 1.9 * dif.speed * dt } else dg = max(dg, 1 - d / 14)
                 if (smilerHome != null) { e.x = e.x.coerceIn(smilerHome[0] + 1.0, smilerHome[2].toDouble()); e.y = e.y.coerceIn(smilerHome[1] + 1.0, smilerHome[3].toDouble()) }
             }
-            if (awake && d < dif.catchR && isLethal(e)) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
+            if (awake && grace <= 0.0 && d < dif.catchR && isLethal(e)) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
         }
         danger = dg.coerceIn(0.0, 1.0)
         presence += (pr - presence) * min(1.0, dt * 3)
@@ -311,6 +328,53 @@ class Game {
         }
     }
 
+    /** After the death animation: the trial pulls you out of danger on Class 3+ levels (sometimes), or you simply start over. */
+    private fun afterDeath() {
+        if (level == LV_WARRIOR) { returnFromTrial("YOU FAILED THE TRIAL"); return }
+        if (!Settings.explore && levelDef(level).danger >= 3 && Math.random() < 0.4) { enterTrial(); return }
+        hunger = max(hunger, 0.5); starveT = 0.0; enter(level)
+    }
+    private fun enterTrial() {
+        origin = Origin(level, x, y, a, pitch, entities.map { it.copy() })
+        enter(LV_WARRIOR, "THE WARRIOR TAKES YOU OUT OF DANGER")
+        say("A TRIAL AWAITS  ·  CLIMB THE VOLCANO, ENTER THE LAKE")
+    }
+    /** Refusing or failing the trial sends you back to the danger you came from (Level 0 if you never came from one). */
+    private fun returnFromTrial(msg: String) {
+        val o = origin; origin = null
+        if (o == null) { enter(LV_THRESHOLD, msg); return }
+        enter(o.level, msg)
+        x = o.x; y = o.y; a = o.a; pitch = o.pitch
+        entities.clear(); entities.addAll(o.ents.map { it.copy() })
+        hunger = max(hunger, 0.5); starveT = 0.0; grace = 2.5
+        say("BACK WHERE YOU FELL  ·  RUN")
+    }
+    /** The lake in the crater: a random safe level, usually Level 1 or Level 11. */
+    private fun completeTrial() {
+        origin = null
+        val safe = LEVELS.filter { it.safe && it.id != LV_WARRIOR }.map { it.id }
+        val r = Math.random()
+        val dest = if (r < 0.45) 1 else if (r < 0.90) LV_CITY else safe[(Math.random() * safe.size).toInt()]
+        enter(dest, "YOU PASSED THE TRIAL")
+    }
+    private fun spawnTrial() {
+        entities.add(Entity(2.5, 22.5, E_WARRIOR))
+        val n = max(3, (5 * DIFFS[Settings.diff].count).roundToInt())
+        for (k in 0 until n) { val p = Island.tunnelPoint(4.0 + (Island.TUNNEL_LENGTH - 6) * (k + 0.5) / n); entities.add(Entity(p[0], p[1], E_TARANTULA)) }
+    }
+    private fun updateTrial(dt: Double) {
+        val cx = floor(x).toInt(); val cy = floor(y).toInt(); val r = Island.rad(cx, cy)
+        if (r > Island.SEA) { returnFromTrial("YOU TURNED YOUR BACK ON THE TRIAL"); return }
+        if (r < Island.LAKE) { completeTrial(); return }
+        if (!Island.tunnel(cx, cy)) return
+        trialT += dt
+        if (trialT > 14 && (trialT - 14) % 16 < dt && entities.count { it.type == E_TARANTULA } < 8) { // the Warrior reworks the cave: another spider ahead of you
+            if (!warnReworked) { warnReworked = true; say("THE WARRIOR REWORKS THE CAVE AROUND YOU") }
+            for (i in 0 until 20) { val p = Island.tunnelPoint(Math.random() * Island.TUNNEL_LENGTH)
+                if (hypot(p[0] - x, p[1] - y) in 7.0..13.0) { entities.add(Entity(p[0], p[1], E_TARANTULA)); break } }
+        }
+    }
+
     /** Level 2: when a cult room comes within 40 cells, Jerry and six cultists appear in it (once per visit). */
     private fun updateRooms(dt: Double) {
         if (level != LV_UTILITY) return
@@ -319,6 +383,7 @@ class Game {
         for (sy in sy0 - 1..sy0 + 1) for (sx in sx0 - 1..sx0 + 1) {
             val c = Level02AbandonedUtilityHalls.jerryRoom(sx, sy) ?: continue
             if (cellKey(sx, sy) in roomsDone || hypot(c[0] + 0.5 - x, c[1] + 0.5 - y) > 40) continue
+            if (entities.any { it.type == E_JERRY && hypot(it.x - c[0] - 0.5, it.y - c[1] - 0.5) < 3 }) { roomsDone.add(cellKey(sx, sy)); continue }
             roomsDone.add(cellKey(sx, sy))
             entities.add(Entity(c[0] + 0.5, c[1] + 0.5, E_JERRY))
             for (k in 0 until 6) { val a = k * PI / 3; entities.add(Entity(c[0] + 0.5 + 3 * cos(a), c[1] + 0.5 + 3 * sin(a), E_CULTIST)) }

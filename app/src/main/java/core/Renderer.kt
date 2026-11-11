@@ -60,33 +60,36 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
 
     private fun sq(a: Double) = a * a
-    private val HZC = pack(100, 62, 90) // horizon glow: distant ground fades into it, matching the sky
+    private fun segd(px: Double, py: Double, ax: Double, ay: Double, bx: Double, by: Double): Double { // distance from a point to a segment
+        val dx = bx - ax; val dy = by - ay; val t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).coerceIn(0.0, 1.0)
+        return hypot(px - (ax + t * dx), py - (ay + t * dy))
+    }
     private fun blend(a: Int, b: Int, t: Int): Int { val u = 256 - t
         return pack((((a shr 16) and 255) * u + ((b shr 16) and 255) * t) shr 8, (((a shr 8) and 255) * u + ((b shr 8) and 255) * t) shr 8, ((a and 255) * u + (b and 255) * t) shr 8) }
 
     /** City rows: above the horizon the star sky (no ceiling), below it street, sidewalk, grass, hazing into the horizon glow. */
-    private fun cityRows(px: IntArray, lp: Lamps, r0: Int, r1: Int, hz: Int, vs: Double, fk: Double, gl: Double, t: Double,
+    private fun openRows(ow: OpenWorld, px: IntArray, lp: Lamps, r0: Int, r1: Int, hz: Int, vs: Double, fk: Double, gl: Double, t: Double,
                          x: Double, y: Double, dx: Double, dy: Double, plX: Double, plY: Double, d: LevelDef, ts: TexSet) {
-        val sky = City.sky; val tn = d.tint
+        val sky = ow.sky; val tn = d.tint; val roof = ow.roofed(floor(x).toInt(), floor(y).toInt())
         for (yy in r0 until r1) {
             val dr = yy - hz
-            if (dr <= 0) { val base = rowV[yy] * 2048; for (xx in 0 until W) px[yy * W + xx] = sky[base + colU[xx]]; continue }
+            if (dr <= 0) { if (roof) for (xx in 0 until W) px[yy * W + xx] = ow.roofColor else { val base = rowV[yy] * 2048; for (xx in 0 until W) px[yy * W + xx] = sky[base + colU[xx]] }; continue }
             val rd = 0.5 * H * vs / dr
             val fog = 1.0 / (1 + rd * rd * fk)
-            val ha = ((1.0 - 1.0 / (1 + rd * rd * 0.0007 * Settings.fogScale)) * 256).toInt() // distance haze
+            val ha = ((1.0 - 1.0 / (1 + rd * rd * ow.hazeK * Settings.fogScale)) * 256).toInt() // distance haze
             for (xx in 0 until W) {
                 val cx = camX[xx]
                 val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
                 val ix = floor(wx).toInt(); val iy = floor(wy).toInt()
                 val tx = ((wx - ix) * 64).toInt() and 63; val ty = ((wy - iy) * 64).toInt() and 63
-                val lit = mul(City.ground(wx, wy, ix, iy, ts.floor[ty * 64 + tx]), lightAt(d, lp, wx, wy, t) * gl * fog * 0.95 * (if (City.darkCell(ix, iy)) 0.12 else 1.0), tn)
-                px[yy * W + xx] = if (ha > 0) blend(lit, HZC, ha) else lit
+                val lit = mul(ow.ground(wx, wy, ix, iy, ts.floor[ty * 64 + tx]), lightAt(d, lp, wx, wy, t) * gl * fog * 0.95 * ow.dim(ix, iy), tn)
+                px[yy * W + xx] = if (ha > 0) blend(lit, ow.haze, ha) else lit
             }
         }
     }
 
     /** One city column. The ray keeps going past low buildings so taller ones behind show above them; hits are drawn far to near. */
-    private fun cityCol(px: IntArray, xx: Int, lp: Lamps, x: Double, y: Double, rx: Double, ry: Double, hz: Int, vs: Double, fk: Double, gl: Double, t: Double, d: LevelDef) {
+    private fun openCol(ow: OpenWorld, lv: Int, px: IntArray, xx: Int, lp: Lamps, x: Double, y: Double, rx: Double, ry: Double, hz: Int, vs: Double, fk: Double, gl: Double, t: Double, d: LevelDef) {
         var mapX = floor(x).toInt(); var mapY = floor(y).toInt()
         val ddx = abs(1 / rx); val ddy = abs(1 / ry)
         val stepX = if (rx < 0) -1 else 1; val stepY = if (ry < 0) -1 else 1
@@ -95,8 +98,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         var side = 0; var n = 0; var cnt = 0; var topBest = Int.MAX_VALUE
         while (n++ < 72) {
             if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
-            if (!isWall(LV_CITY, mapX, mapY)) continue
-            val ht = City.height(mapX, mapY)
+            if (!isWall(lv, mapX, mapY)) continue
+            val ht = ow.height(mapX, mapY)
             val pp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
             val lh = (H * vs / pp).toInt().coerceAtLeast(1)
             val top = hz + lh / 2 - lh * ht
@@ -104,7 +107,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             if (top <= 0 || cnt == 8) break
         }
         zb[xx] = if (cnt > 0) lp.hpp[0] else 72.0
-        val tex = City.tex; val tn = d.tint
+        val tex = ow.tex; val tn = d.tint
         for (k in cnt - 1 downTo 0) {
             val mx = lp.hmx[k]; val my = lp.hmy[k]; val sd = lp.hsd[k]; val ht = lp.hht[k]; val pp = lp.hpp[k]
             val hx = x + pp * rx; val hy = y + pp * ry
@@ -112,25 +115,25 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             if ((sd == 0 && rx > 0) || (sd == 1 && ry < 0)) tx = 63 - tx
             val fogF = 1.0 / (1 + pp * pp * fk); val sideF = if (sd == 1) 0.82 else 1.0
             // the face is inside a dark building when the cell the ray came from is: no lamps, and the windows are dead too
-            val dk = City.darkCell(if (sd == 0) mx - (if (rx < 0) -1 else 1) else mx, if (sd == 0) my else my - (if (ry < 0) -1 else 1))
-            val kk = (lightAt(d, lp, hx, hy, t) * gl * fogF * sideF * (if (dk) 0.12 else 1.0) * 256).toInt().coerceIn(0, 640)
-            val ke = if (dk) kk else (256 * (0.45 + 0.55 * fogF) * sideF).toInt() // lit windows glow: they dim with distance but not with the lamps
+            val dm = ow.dim(if (sd == 0) mx - (if (rx < 0) -1 else 1) else mx, if (sd == 0) my else my - (if (ry < 0) -1 else 1))
+            val kk = (lightAt(d, lp, hx, hy, t) * gl * fogF * sideF * dm * 256).toInt().coerceIn(0, 640)
+            val ke = if (dm < 1.0) kk else (256 * (0.45 + 0.55 * fogF) * sideF).toInt() // lit windows glow: they dim with distance but not with the lamps
             val kr = kk * tn[0]; val kg = kk * tn[1]; val kb = kk * tn[2]; val er = ke * tn[0]; val eg = ke * tn[1]; val eb = ke * tn[2]
-            val ha = ((1.0 - 1.0 / (1 + pp * pp * 0.0007 * Settings.fogScale)) * 256).toInt()
+            val ha = ((1.0 - 1.0 / (1 + pp * pp * ow.hazeK * Settings.fogScale)) * 256).toInt()
             val lh = (H * vs / pp).toInt().coerceAtLeast(1)
             val bottom = hz + lh / 2; val top = bottom - lh * ht
             val y0 = max(0, top); val y1 = min(H - 1, bottom)
             val step = 64.0 / lh; var tpos = (y0 - top) * step
-            val kind = City.kind(mx, my); val vv = (mx * 7 + my * 13) and 3; val unst = unstable(LV_CITY, mx, my)
+            val style = ow.style(mx, my); val unst = unstable(lv, mx, my)
             for (yy in y0..y1) {
                 val tp = tpos.toInt(); tpos += step
                 val unit = tp shr 6 // floors counted from the roof line; the last one is the ground floor
-                val ti = if (kind == 4) 18 else if (kind == 3) (if (unit >= ht - 1) 13 else 12) else if (unit >= ht - 1) 14 + vv else kind * 4 + ((vv + unit) and 3)
+                val ti = ow.texIndex(style, unit, ht)
                 val tx2 = if (unst) (tx + (sin(t * 11 + yy * 0.25) * 4).toInt()) and 63 else tx
                 val c = tex[ti][(tp and 63) * 64 + tx2]
                 var o = if ((c ushr 24) == 0xFE) mul2(c, er, eg, eb) else mul2(c, kr, kg, kb)
                 if (unst) o = pack((((o shr 16) and 255) * 3) / 4, ((o shr 8) and 255) + 25, (o and 255) + 60) // cold, wobbling = not solid
-                px[yy * W + xx] = if (ha > 0) blend(o, HZC, ha) else o
+                px[yy * W + xx] = if (ha > 0) blend(o, ow.haze, ha) else o
             }
         }
     }
@@ -186,7 +189,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private fun sprite(type: Int, u: Double, v: Double, dim: Double, fr: Boolean = false): Int { // fr = friendly (Explore): green eyes, soft glow
         val dark = pack((16 * dim).toInt(), (14 * dim).toInt(), (10 * dim).toInt())
         return when (type) {
-            0, 3, 4, 7, 8 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow; type 4 (Faceling) has a pale head with misplaced features
+            0, 3, 4, 7, 8, 9 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow; type 4 (Faceling) has a pale head with misplaced features
                 val inside = when {
                     v < 0.17 -> sq(u / 0.42) + sq((v - 0.09) / 0.085) < 1
                     v < 0.22 -> abs(u) < 0.18
@@ -204,6 +207,10 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                 else if (type == 7) { // Jerry: ragged red robe, a round yellow face with a fixed smile
                     if (v < 0.17) { val eye = sq((abs(u) - 0.12) / 0.05) + sq((v - 0.07) / 0.03) < 1; val smile = abs(u) < 0.2 && abs(v - (0.11 + 0.05 * sq(u / 0.2))) < 0.012
                         if (eye || smile) sc(30, 20, 10, dim) else sc(240, 208, 60, dim) } else sc(120, 30, 30, dim)
+                }
+                else if (type == 9) { // The Warrior: plated armour, a helmet with a red plume, a gold belt
+                    if (v < 0.17) { if (v < 0.07 && abs(u) < 0.3) sc(200, 40, 40, dim) else if (v in 0.09..0.11 && abs(u) < 0.25) sc(20, 20, 24, dim) else sc(150, 156, 168, dim) }
+                    else if (v in 0.52..0.56) sc(200, 160, 50, dim) else if (v < 0.6) sc(120, 128, 142, dim) else sc(76, 80, 92, dim)
                 }
                 else if (type == 8) { if (v < 0.17) sc(18, 16, 20, dim) else sc(72, 72, 84, dim) } // Cultist: grey hooded robe, dark where the face should be
                 else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225)
@@ -231,6 +238,14 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                         if (abs(abs(u - cu) - 0.05) < 0.03 && abs(v - cv + 0.02) < 0.025) sc(20, 16, 16, dim) else sc(225, 200, 180, dim) }
                     else sc((130 * f).toInt(), (66 * f).toInt(), (60 * f).toInt(), dim)
                 }
+            }
+            10 -> { // Tarantula: a hairy dark body, red eyes, eight long bent legs
+                val au = abs(u)
+                val body = sq(u / 0.32) + sq((v - 0.6) / 0.2) < 1; val head = sq(u / 0.14) + sq((v - 0.43) / 0.12) < 1
+                var leg = false
+                for (j in 0..3) { val v0 = 0.5 + 0.05 * j; val k1 = 0.62 + 0.09 * j; val kv = 0.28 + 0.08 * j
+                    if (segd(au, v, 0.28, v0, k1, kv) < 0.03 || segd(au, v, k1, kv, 0.97, 0.92) < 0.03) leg = true }
+                when { head && abs(au - 0.06) < 0.035 && abs(v - 0.42) < 0.03 -> pack(255, 40, 30); body || head -> sc(54, 38, 30, dim); leg -> sc(70, 50, 38, dim); else -> 0 }
             }
             S_LAMP -> if (v < 0.06 && abs(u) < 0.9) pack(255, 236, 170) else if (abs(u) < 0.18) sc(70, 72, 80, dim) else 0 // street lamp
             S_RATION -> { // ration: tin can
@@ -272,13 +287,14 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         val fk = d.fogK * Settings.fogScale // Options > Fog scales every level's own fog
 
         // floor + ceiling (rows are split between threads)
-        if (lv == LV_CITY) { // the city: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
+        val ow = spec.world
+        if (ow != null) { // open sky: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
             for (xx in 0 until W) colU[xx] = (((atan2(dy + plY * camX[xx], dx + plX * camX[xx]) / (2 * PI)) * 2048).toInt()) and 2047
             for (yy in 0 until min(H, hz + 1)) rowV[yy] = (atan((hz - yy) / (H * vs)) / (PI / 2) * 255).toInt().coerceIn(0, 255)
         }
         par(H) { b, r0, r1 ->
             val lp = bands[b]
-            if (lv == LV_CITY) { cityRows(px, lp, r0, r1, hz, vs, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
+            if (ow != null) { openRows(ow, px, lp, r0, r1, hz, vs, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
             for (yy in r0 until r1) {
                 val dr = yy - hz
                 if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
@@ -303,7 +319,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         // textured walls (DDA; columns are split between threads)
         par(W) { b, c0, c1 ->
             val lp = bands[b]
-            if (lv == LV_CITY) { for (xx in c0 until c1) cityCol(px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, fk, gl, t, d); return@par }
+            if (ow != null) { for (xx in c0 until c1) openCol(ow, lv, px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, fk, gl, t, d); return@par }
             for (xx in c0 until c1) {
                 val cx = camX[xx]
                 val rx = dx + plX * cx; val ry = dy + plY * cx
@@ -351,10 +367,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
             items.add(doubleArrayOf(o[0], o[1], 0.0))
         }
-        if (lv == LV_CITY) { // street lamps on the lamp lattice (the light pools come from lightAt)
-            for (ky in floor((y - 14 - 0.5) / 8).toInt()..floor((y + 14 - 0.5) / 8).toInt()) for (kx in floor((x - 14 - 0.5) / 8).toInt()..floor((x + 14 - 0.5) / 8).toInt())
-                if (City.lampOk(kx * 8, ky * 8)) items.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, S_LAMP.toDouble()))
-        }
+        ow?.extraSprites(x, y, items)
         for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
         for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) S_RATION.toDouble() else S_WATER.toDouble()))
         for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
@@ -365,8 +378,8 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
-            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
             val bottom = hz + (full / 2).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly

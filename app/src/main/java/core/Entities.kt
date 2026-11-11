@@ -17,11 +17,12 @@ object CityRules {
 /** Entity types (Entity.type). Sprite codes from 20 up are items (see Renderer). */
 const val E_HOUND = 1; const val E_SMILER = 2; const val E_STEALER = 3; const val E_FACELING = 4
 const val E_DEATHMOTH = 5; const val E_CLUMP = 6; const val E_JERRY = 7; const val E_CULTIST = 8
+const val E_WARRIOR = 9; const val E_TARANTULA = 10
 const val S_RATION = 20; const val S_WATER = 21; const val S_LAMP = 22
 /** Monsters Explore mode makes friendly. */
-fun isMonster(type: Int) = type == E_HOUND || type == E_SMILER || type == E_STEALER || type == E_FACELING || type == E_CLUMP
+fun isMonster(type: Int) = type == E_HOUND || type == E_SMILER || type == E_STEALER || type == E_FACELING || type == E_CLUMP || type == E_TARANTULA
 /** Entities that never hurt you and do not make the lights flicker. */
-fun isHarmless(type: Int) = type == E_DEATHMOTH || type == E_JERRY || type == E_CULTIST
+fun isHarmless(type: Int) = type == E_DEATHMOTH || type == E_JERRY || type == E_CULTIST || type == E_WARRIOR
 /** Touching one ends the run (a Faceling only while it hunts you). */
 fun isLethal(e: Entity) = isMonster(e.type) && (e.type != E_FACELING || e.chase)
 
@@ -32,6 +33,7 @@ class Entity(var x: Double, var y: Double, val type: Int) {
     @Volatile var passive = false              // calm or friendly right now (drawn with the friendly look)
     var followT = 0.0                          // Faceling: seconds spent following you
     var gx = 0; var gy = 0; var hasGoal = false; var goalT = 0.0 // Hound: stocked building it leads you to
+    fun copy() = Entity(x, y, type).also { it.dir = dir; it.chase = chase; it.home = home; it.followT = followT }
     var wx = 0; var wy = 0; var hasWp = false; var routeT = 0.0   // next cell on the way there
 }
 
