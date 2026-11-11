@@ -24,7 +24,8 @@ class Game {
     @Volatile var supplies: List<Supply> = emptyList()
     private val taken = HashSet<Long>()
     private var scanX = Int.MIN_VALUE; private var scanY = 0
-    private var warnHungry = false; private var warnHallu = false
+    private var warnHungry = false; private var warnHallu = false; private var warnJerry = false
+    private val roomsDone = HashSet<Long>(); private var roomT = 0.0
     var notice = ""; @Volatile var noticeT = 0.0; var deathMsg = "YOU WERE CAUGHT"
     fun say(s: String) { notice = s; noticeT = 3.5 }
     init { enter(0) }
@@ -32,7 +33,7 @@ class Game {
     /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
     private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
-    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false }
+    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0 }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
     private fun rescan(cx: Int, cy: Int) {
         scanX = cx; scanY = cy
@@ -75,11 +76,18 @@ class Game {
         entities.clear(); presence = 0.0
         val df = DIFFS[Settings.diff]; val ld = levelDef(level); val cast = ld.cast
         val n = if (cast.isEmpty()) ld.eCount else cast.size // entity-free levels stay entity-free
+        var group: Entity? = null // Facelings outside Level 11 come in groups
         repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) { i ->
-            if (level == LV_CITY && !cast.isEmpty() && cast[i % cast.size] == 2) { val s = spawnInBuilding(); if (s != null) { entities.add(s); return@repeat } }
+            val type = if (cast.isEmpty()) ld.eType else cast[i % cast.size]
+            if (level == LV_CITY && type == E_SMILER) { val s = spawnInBuilding(); if (s != null) { entities.add(s); return@repeat } }
+            if (type == E_FACELING && level != LV_CITY && group != null) {
+                val a2 = Math.random() * 6.283; val r2 = 1.5 + Math.random() * 1.5; val q2 = findFree(group!!.x + cos(a2) * r2, group!!.y + sin(a2) * r2)
+                entities.add(Entity(q2.first, q2.second, type)); return@repeat
+            }
             val ang = Math.random() * 6.283; val d = (11 + Math.random() * 8) * df.spawn
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
-            entities.add(Entity(q.first, q.second, if (cast.isEmpty()) ld.eType else cast[i % cast.size]))
+            val e = Entity(q.first, q.second, type); entities.add(e)
+            if (type == E_FACELING) group = e
         }
     }
 
@@ -218,12 +226,13 @@ class Game {
         halluc += (((lobbyT - 240) / 300).coerceIn(0.0, 1.0) - halluc) * min(1.0, dt * 0.5)
         if (halluc > 0.08 && !warnHallu) { warnHallu = true; say("YOUR EYES PLAY TRICKS  ·  almond water or the Manila Room helps") } else if (halluc < 0.02) warnHallu = false
         updateGhosts(dt)
+        updateRooms(dt)
 
         var dg = 0.0; var pr = 0.0
         val cityFx = levelDef(level).calm < 1.0 // Level 11 Effect
         for (e in entities) {
             val ex = x - e.x; val ey = y - e.y; val d = hypot(ex, ey).coerceAtLeast(0.01)
-            if (dif.explore && e.type in 1..4) { // Explore: every monster is friendly. It wanders, and tags along at a polite distance
+            if (dif.explore && isMonster(e.type)) { // Explore: every monster is friendly. It wanders, and tags along at a polite distance
                 val follow = d < 12 && d > 3.5
                 if (follow) e.dir = atan2(ey, ex) + sin(levelT * 0.7 + e.x) * 0.5 else e.dir += (Math.random() - 0.5) * dt * 2
                 val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (follow) 1.4 else 0.6) * dt)
@@ -243,7 +252,7 @@ class Game {
             e.passive = false
             val smilerHome = e.home
             val awake = e.type != 2 || smilerHome == null || (floor(x).toInt() in smilerHome[0]..smilerHome[2] && floor(y).toInt() in smilerHome[1]..smilerHome[3]) // a building's Smiler sleeps until you come in
-            if (awake) pr = max(pr, 1 - d / 12)
+            if (awake && !isHarmless(e.type)) pr = max(pr, 1 - d / 12)
             val sight = dif.sight
             if (e.type == 3) { // Skin-Stealer: walks like a player, patiently closes in
                 if (d < 16 * sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22 * sight) e.chase = false
@@ -266,6 +275,21 @@ class Game {
                 if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
                 e.x = r.first; e.y = r.second
                 if (e.chase) dg = max(dg, (1 - d / 8).coerceAtLeast(0.0))
+            } else if (e.type == E_DEATHMOTH) { // Deathmoth: flutters about, usually gentle
+                e.dir += (Math.random() - 0.5) * dt * 7
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), 1.3 * dt)
+                if (r.first == e.x && r.second == e.y) e.dir += 2.0
+                e.x = r.first; e.y = r.second
+            } else if (e.type == E_CLUMP) { // Clump: a lumbering mass that hunts whatever it senses; very dangerous
+                if (d < 14 * sight && los(level, e.x, e.y, x, y)) e.chase = true else if (d > 22 * sight) e.chase = false
+                if (e.chase) e.dir = atan2(ey, ex) else e.dir += (Math.random() - 0.5) * dt * 2
+                val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), (if (e.chase) 3.0 else 0.9) * dif.speed * dt)
+                if (!e.chase && r.first == e.x && r.second == e.y) e.dir += 1.6
+                e.x = r.first; e.y = r.second
+                if (e.chase) dg = max(dg, 1 - d / 14)
+            } else if (e.type == E_JERRY) { // Jerry sits in his room and watches; the cult around him chants
+                if (d < 7 && !warnJerry) { warnJerry = true; say("JERRY AND HIS CULT") }
+            } else if (e.type == E_CULTIST) {
             } else if (awake) { // Smiler: only moves while you are NOT looking at it, drifts through walls (a building's Smiler stays inside it)
                 var df = (atan2(e.y - y, e.x - x) - a) % (2 * PI)
                 if (df > PI) df -= 2 * PI; if (df < -PI) df += 2 * PI
@@ -273,7 +297,7 @@ class Game {
                 if (!seen) { e.x += ex / d * 1.9 * dif.speed * dt; e.y += ey / d * 1.9 * dif.speed * dt } else dg = max(dg, 1 - d / 14)
                 if (smilerHome != null) { e.x = e.x.coerceIn(smilerHome[0] + 1.0, smilerHome[2].toDouble()); e.y = e.y.coerceIn(smilerHome[1] + 1.0, smilerHome[3].toDouble()) }
             }
-            if (awake && d < dif.catchR && (e.type <= 3 || (e.type == 4 && e.chase))) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
+            if (awake && d < dif.catchR && isLethal(e)) { dead = true; deadT = 0.0; deathMsg = "YOU WERE CAUGHT" }
         }
         danger = dg.coerceIn(0.0, 1.0)
         presence += (pr - presence) * min(1.0, dt * 3)
@@ -284,6 +308,20 @@ class Game {
         for (sp in supplies) if (!dif.explore && hypot(sp.x + 0.5 - x, sp.y + 0.5 - y) < 0.75 && (if (sp.type == 1) rations else water) < 9) {
             taken.add(cellKey(sp.x, sp.y)); if (sp.type == 1) rations++ else water++
             say(if (sp.type == 1) "+1 RATION" else "+1 ALMOND WATER"); scanX = Int.MIN_VALUE
+        }
+    }
+
+    /** Level 2: when a cult room comes within 40 cells, Jerry and six cultists appear in it (once per visit). */
+    private fun updateRooms(dt: Double) {
+        if (level != LV_UTILITY) return
+        roomT -= dt; if (roomT > 0) return; roomT = 1.0
+        val sx0 = Math.floorDiv(floor(x).toInt(), JERRY_SECTOR); val sy0 = Math.floorDiv(floor(y).toInt(), JERRY_SECTOR)
+        for (sy in sy0 - 1..sy0 + 1) for (sx in sx0 - 1..sx0 + 1) {
+            val c = Level02AbandonedUtilityHalls.jerryRoom(sx, sy) ?: continue
+            if (cellKey(sx, sy) in roomsDone || hypot(c[0] + 0.5 - x, c[1] + 0.5 - y) > 40) continue
+            roomsDone.add(cellKey(sx, sy))
+            entities.add(Entity(c[0] + 0.5, c[1] + 0.5, E_JERRY))
+            for (k in 0 until 6) { val a = k * PI / 3; entities.add(Entity(c[0] + 0.5 + 3 * cos(a), c[1] + 0.5 + 3 * sin(a), E_CULTIST)) }
         }
     }
 

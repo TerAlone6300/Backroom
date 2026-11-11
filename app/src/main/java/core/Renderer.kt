@@ -14,6 +14,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private val camX = DoubleArray(W) { 2.0 * it / W - 1 }
     private var grain = 1234567
     private var frame = 0
+    private var spec: LevelSpec = Level00Threshold; private var zonesOn = false
     private var lpx = 0.0; private var lpy = 0.0; private var lant = 0.0; private var pres = 0.0
     private val nt = max(1, threads)
     private val pool = if (nt > 1) java.util.concurrent.Executors.newFixedThreadPool(nt - 1) { r -> Thread(r).also { it.isDaemon = true } } else null
@@ -22,6 +23,11 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private inner class Lamps {
         val kx = IntArray(256); val ky = IntArray(256); val fr = IntArray(256); val v = DoubleArray(256)
         var mx = 0; var my = 0; var mv = 1.0; var mf = -1
+        var zx = Int.MIN_VALUE; var zy = 0; var zv = 1.0 // memo of the blackout factor of the last lamp cell
+        fun zone(sp: LevelSpec, d: LevelDef, x: Int, y: Int): Double {
+            if (x == zx && y == zy) return zv
+            zx = x; zy = y; zv = sp.darkness((x * d.period + d.lamp0).toInt(), (y * d.period + d.lamp0).toInt()); return zv
+        }
         val hmx = IntArray(8); val hmy = IntArray(8); val hsd = IntArray(8); val hht = IntArray(8); val hpp = DoubleArray(8) // wall hits along one city ray
         fun at(lv: Int, x: Int, y: Int, t: Double): Double {
             if (mf == frame && x == mx && y == my) return mv // neighbouring pixels almost always share the lamp
@@ -159,7 +165,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         val p = d.period
         val kx = floor((wx - d.lamp0) * d.ip + 0.5).toInt(); val ky = floor((wy - d.lamp0) * d.ip + 0.5).toInt()
         val ddx = wx - (kx * p + d.lamp0); val ddy = wy - (ky * p + d.lamp0)
-        val lamp = d.ambient + lp.at(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff)
+        val lamp = (d.ambient + lp.at(d.id, kx, ky, t) / (1 + (ddx * ddx + ddy * ddy) * d.falloff)) * (if (zonesOn) lp.zone(spec, d, kx, ky) else 1.0)
         return if (lant > 0.0) lamp + lant / (1 + (sq(wx - lpx) + sq(wy - lpy)) * 0.35) else lamp
     }
 
@@ -180,7 +186,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     private fun sprite(type: Int, u: Double, v: Double, dim: Double, fr: Boolean = false): Int { // fr = friendly (Explore): green eyes, soft glow
         val dark = pack((16 * dim).toInt(), (14 * dim).toInt(), (10 * dim).toInt())
         return when (type) {
-            0, 3, 4 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow; type 4 (Faceling) has a pale head with misplaced features
+            0, 3, 4, 7, 8 -> { // player = tall dark figure with glowing eyes; type 3 (Skin-Stealer) copies it, minus the glow; type 4 (Faceling) has a pale head with misplaced features
                 val inside = when {
                     v < 0.17 -> sq(u / 0.42) + sq((v - 0.09) / 0.085) < 1
                     v < 0.22 -> abs(u) < 0.18
@@ -195,16 +201,44 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
                         sc((226 * f).toInt(), (206 * f).toInt(), (190 * f).toInt(), dim)
                     } else if (v < 0.58) sc(62, 68, 90, dim) else sc(38, 40, 50, dim)
                 }
+                else if (type == 7) { // Jerry: ragged red robe, a round yellow face with a fixed smile
+                    if (v < 0.17) { val eye = sq((abs(u) - 0.12) / 0.05) + sq((v - 0.07) / 0.03) < 1; val smile = abs(u) < 0.2 && abs(v - (0.11 + 0.05 * sq(u / 0.2))) < 0.012
+                        if (eye || smile) sc(30, 20, 10, dim) else sc(240, 208, 60, dim) } else sc(120, 30, 30, dim)
+                }
+                else if (type == 8) { if (v < 0.17) sc(18, 16, 20, dim) else sc(72, 72, 84, dim) } // Cultist: grey hooded robe, dark where the face should be
                 else if (type == 0 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(255, 255, 225)
                 else if (fr && type == 3 && v in 0.075..0.10 && abs(abs(u) - 0.17) < 0.07) pack(130, 255, 160) else dark
             }
-            9 -> if (v < 0.06 && abs(u) < 0.9) pack(255, 236, 170) else if (abs(u) < 0.18) sc(70, 72, 80, dim) else 0 // street lamp
-            7 -> { // ration: tin can
+            5 -> { // Deathmoth: a big pale moth, a skull-like mark on each wing
+                val body = abs(u) < 0.1 && v in 0.15..0.85
+                val wing = abs(u) in 0.1..0.95 && abs(v - 0.45) < 0.38 * (1 - (abs(u) - 0.1) / 0.9)
+                val eye = sq((abs(u) - 0.5) / 0.16) + sq((v - 0.45) / 0.2) < 1
+                when {
+                    eye && sq((abs(u) - 0.5) / 0.07) + sq((v - 0.45) / 0.09) < 1 -> sc(240, 230, 200, dim)
+                    eye -> sc(40, 30, 30, dim)
+                    body -> sc(90, 80, 70, dim)
+                    wing -> sc(176, 158, 134, dim)
+                    v < 0.2 && abs(abs(u) - 0.2) < 0.04 -> sc(90, 80, 70, dim)
+                    else -> 0
+                }
+            }
+            6 -> { // Clump: a heap of fused bodies with a few pale faces in the mass
+                val lump = sq(u / 0.8) + sq((v - 0.62) / 0.36) < 1 || sq((u + 0.45) / 0.4) + sq((v - 0.45) / 0.3) < 1 || sq((u - 0.5) / 0.42) + sq((v - 0.5) / 0.32) < 1 || sq((u - 0.05) / 0.35) + sq((v - 0.3) / 0.24) < 1
+                if (!lump) 0 else {
+                    val f = 0.7 + 0.5 * h((u * 30).toInt(), (v * 30).toInt(), 777)
+                    val f1 = sq((u + 0.5) / 0.13) + sq((v - 0.5) / 0.11) < 1; val f2 = sq((u - 0.45) / 0.13) + sq((v - 0.42) / 0.11) < 1; val f3 = sq((u - 0.05) / 0.13) + sq((v - 0.28) / 0.11) < 1
+                    if (f1 || f2 || f3) { val cu = if (f1) -0.5 else if (f2) 0.45 else 0.05; val cv = if (f1) 0.5 else if (f2) 0.42 else 0.28
+                        if (abs(abs(u - cu) - 0.05) < 0.03 && abs(v - cv + 0.02) < 0.025) sc(20, 16, 16, dim) else sc(225, 200, 180, dim) }
+                    else sc((130 * f).toInt(), (66 * f).toInt(), (60 * f).toInt(), dim)
+                }
+            }
+            S_LAMP -> if (v < 0.06 && abs(u) < 0.9) pack(255, 236, 170) else if (abs(u) < 0.18) sc(70, 72, 80, dim) else 0 // street lamp
+            S_RATION -> { // ration: tin can
                 if (abs(u) > 0.7 || v < 0.15) 0
                 else if (v < 0.3 || v > 0.9) sc(196, 200, 204, dim)
                 else if (v in 0.45..0.75) sc(236, 226, 190, dim) else sc(170, 60, 46, dim)
             }
-            8 -> { // almond water: bottle with a cream label
+            S_WATER -> { // almond water: bottle with a cream label
                 val neck = abs(u) < 0.28 && v in 0.08..0.3; val body = abs(u) < 0.7 && v in 0.3..1.0
                 if (!neck && !body) 0
                 else if (v < 0.14) sc(210, 170, 60, dim)
@@ -228,6 +262,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
         val lv = g.level; val d = levelDef(lv); val ts = texOf(lv); val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
+        spec = levelSpec(lv); zonesOn = spec.zones; for (b in bands) b.zx = Int.MIN_VALUE
         frame++; lpx = x; lpy = y; lant = d.lantern; pres = g.presence
         val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
         val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.985) 0.75 else 1.0 // very rare, mild global flicker
@@ -318,10 +353,10 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         }
         if (lv == LV_CITY) { // street lamps on the lamp lattice (the light pools come from lightAt)
             for (ky in floor((y - 14 - 0.5) / 8).toInt()..floor((y + 14 - 0.5) / 8).toInt()) for (kx in floor((x - 14 - 0.5) / 8).toInt()..floor((x + 14 - 0.5) / 8).toInt())
-                if (City.lampOk(kx * 8, ky * 8)) items.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, 9.0))
+                if (City.lampOk(kx * 8, ky * 8)) items.add(doubleArrayOf(kx * 8 + 0.5, ky * 8 + 0.5, S_LAMP.toDouble()))
         }
-        for (e in g.entities) items.add(if (e.passive && e.type in 1..4) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
-        for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) 7.0 else 8.0))
+        for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
+        for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) S_RATION.toDouble() else S_WATER.toDouble()))
         for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
         items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
         for (o in items) {
@@ -330,12 +365,12 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val hk = when (type) { 1 -> 0.6; 7 -> 0.2; 8 -> 0.26; 9 -> 1.7; else -> 0.9 }
-            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 7 -> 0.9; 8 -> 0.55; 9 -> 0.25; else -> 0.42 }
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
-            val bottom = hz + (full / 2).toInt(); val top = bottom - sh
-            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 7) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
+            val bottom = hz + (full / 2).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly
+            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 20) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
             for (col in max(0, sx - sw / 2)..min(W - 1, sx + sw / 2)) {
                 if (ty >= zb[col]) continue
                 val u = (col - sx) / (sw / 2.0)

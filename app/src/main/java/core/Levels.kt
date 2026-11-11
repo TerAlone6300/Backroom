@@ -26,11 +26,14 @@ interface LevelSpec {
     fun textures(t: TexSet)
     /** True where the long-hallway overlay must leave the maze alone. */
     fun keepsMaze(x: Int, y: Int): Boolean = false
+    /** Levels with blackout zones set this and answer how lit the lamp cell around (x, y) is: 1 = normal, less = dark. */
+    val zones: Boolean get() = false
+    fun darkness(x: Int, y: Int): Double = 1.0
 }
 
 /** Level numbers are the Backrooms Wikidot numbers: the id of a level IS its number (0 1 2 3 4 5 6 11 37 75 139 182 201), in this order. */
 val LEVEL_SPECS: List<LevelSpec> = listOf(
-    Level00Threshold, Level01HabitableZone, Level02PipeDreams, Level03ElectricalStation, Level04AbandonedOffice, Level05TerrorHotel, Level06LightsOut,
+    Level00Threshold, Level01HabitableZone, Level02AbandonedUtilityHalls, Level03ElectricalStation, Level04AbandonedOffice, Level05TerrorHotel, Level06LightsOut,
     Level11TheCity, Level37Sublimity, Level75Liminality, Level139GrayscaleHalls, Level182CityOfDusk, Level201Threshold)
 
 val LEVELS: List<LevelDef> = LEVEL_SPECS.map { it.def }

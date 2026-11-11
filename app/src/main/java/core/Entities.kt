@@ -14,6 +14,17 @@ object CityRules {
     const val PROVOKE_SECONDS = 2.5
 }
 
+/** Entity types (Entity.type). Sprite codes from 20 up are items (see Renderer). */
+const val E_HOUND = 1; const val E_SMILER = 2; const val E_STEALER = 3; const val E_FACELING = 4
+const val E_DEATHMOTH = 5; const val E_CLUMP = 6; const val E_JERRY = 7; const val E_CULTIST = 8
+const val S_RATION = 20; const val S_WATER = 21; const val S_LAMP = 22
+/** Monsters Explore mode makes friendly. */
+fun isMonster(type: Int) = type == E_HOUND || type == E_SMILER || type == E_STEALER || type == E_FACELING || type == E_CLUMP
+/** Entities that never hurt you and do not make the lights flicker. */
+fun isHarmless(type: Int) = type == E_DEATHMOTH || type == E_JERRY || type == E_CULTIST
+/** Touching one ends the run (a Faceling only while it hunts you). */
+fun isLethal(e: Entity) = isMonster(e.type) && (e.type != E_FACELING || e.chase)
+
 class Entity(var x: Double, var y: Double, val type: Int) {
     var dir = Math.random() * 6.283; var chase = false
     var home: IntArray? = null                 // Smiler in Level 11: footprint of its building [x0, y0, x1, y1]
