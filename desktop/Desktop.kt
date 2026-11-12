@@ -55,6 +55,9 @@ fun main(args: Array<String>) {
 
     // ---- navigation ----
     fun setCursor(hidden: Boolean) { if (robot != null) panel.cursor = if (hidden) blank else Cursor.getDefaultCursor() }
+    // starting a game asks for its difficulty first: the difficulty belongs to the game (and its save), not to the profile
+    var pendLv = 0; var pendAddr = ""; var pickBack = Scr.MAIN
+    fun openPicker(lv: Int, addr: String, from: Scr) { pendLv = lv; pendAddr = addr; pickBack = from; levelsOpen = false; scr = Scr.DIFFICULTY }
     fun startGame(addr: String = "", lv: Int = 0, load: SaveData? = null) {
         net?.close()
         val a = addr.trim()
@@ -63,6 +66,7 @@ fun main(args: Array<String>) {
         slot = load?.id; playT = 0.0; levelsOpen = false; recenter = true
         playing = true; scr = Scr.GAME; setCursor(true)
     }
+    fun pickDifficulty(i: Int) { if (i in DIFFS.indices) { Settings.putDiff(i); startGame(pendAddr, pendLv) } }
     fun openSaves() { saves = Store.list(); scrollY = 0; levelsOpen = false; scr = Scr.SAVES }
     fun openOptions(from: Scr) { optBack = from; levelsOpen = false; scr = Scr.OPTIONS }
     fun closeOptions() { Store.saveProfile(); scr = optBack }
@@ -82,12 +86,13 @@ fun main(args: Array<String>) {
         when (scr) {
             Scr.MAIN -> if (levelsOpen) levelsOpen = false else System.exit(0)
             Scr.SAVES, Scr.MULTI -> scr = Scr.MAIN
+            Scr.DIFFICULTY -> scr = pickBack
             Scr.OPTIONS -> closeOptions()
             Scr.PAUSE -> resume()
             Scr.GAME -> pause()
         }
     }
-    fun joinServer() { if (ip.isNotBlank()) startGame(ip.toString()) }
+    fun joinServer() { if (ip.isNotBlank()) openPicker(0, ip.toString(), Scr.MULTI) }
 
     panel = object : JPanel() {
         override fun paintComponent(gr: Graphics) {
@@ -103,6 +108,7 @@ fun main(args: Array<String>) {
                 Scr.SAVES -> drawSaves(g2)
                 Scr.MULTI -> drawMulti(g2)
                 Scr.OPTIONS -> drawOptions(g2)
+                Scr.DIFFICULTY -> drawPicker(g2)
                 Scr.MAIN -> drawMain(g2)
             }
         }
@@ -178,7 +184,7 @@ fun main(args: Array<String>) {
                     card(g2, rc, d, if (d.entities == "NONE") "SAFE" else d.entities, if (d.entities == "NONE") Color(150, 200, 150) else Color(235, 110, 90))
                     g2.color = Color(d.accent) // play triangle
                     g2.fillPolygon(intArrayOf(rc.x + rc.width - 26, rc.x + rc.width - 26, rc.x + rc.width - 12), intArrayOf(rc.y + rh / 2 - 9, rc.y + rh / 2 + 9, rc.y + rh / 2), 3)
-                    hitClip(rc, list) { startGame(lv = d.id) }
+                    hitClip(rc, list) { openPicker(d.id, "", Scr.MAIN) }
                 }
                 g2.clip = oldClip
             }
@@ -202,7 +208,7 @@ fun main(args: Array<String>) {
             val oldClip = g2.clip; g2.clip = list
             var y = top - scrollY
             btn(g2, Rectangle(lx, y, lw, rhNew), "NEW GAME", true, ac) {}; hits.removeAt(hits.size - 1)
-            hitClip(Rectangle(lx, y, lw, rhNew), list) { startGame() }
+            hitClip(Rectangle(lx, y, lw, rhNew), list) { openPicker(0, "", Scr.SAVES) }
             y += rhNew + gp
             if (saves.isEmpty()) txt(g2, "No saves yet  ·  use  Save & Quit  in the pause menu (ESC)", cx, y + hh / 24, Font("SansSerif", Font.ITALIC, hh / 44), Color(170, 165, 140))
             for (s in saves) {
@@ -262,6 +268,25 @@ fun main(args: Array<String>) {
             return Rectangle(tl, yTrack - 20, tr - tl, 40)
         }
 
+        fun drawPicker(g2: Graphics2D) {
+            val w = width; val hh = height; val cx = w / 2; val ac = Color(levelDef(0).accent)
+            dim(g2, 225, 200)
+            heading(g2, "DIFFICULTY", ac, 0.15)
+            txt(g2, "Chosen for this game and kept in its save.   Click, or press 1 - 6.", cx, (hh * 0.215).toInt(), Font("SansSerif", Font.ITALIC, hh / 46), Color(200, 195, 160))
+            val cols = arrayOf(Color(150, 200, 150), ac, Color(240, 160, 80), Color(235, 70, 55), Color(110, 210, 200), Color(200, 30, 30))
+            val cw = (w * 0.38).toInt(); val ch = hh / 7; val gx = (w * 0.04).toInt(); val x0 = cx - cw - gx / 2
+            for (i in DIFFS.indices) {
+                val rc = Rectangle(x0 + (i % 2) * (cw + gx), (hh * 0.27).toInt() + (i / 2) * (ch + hh / 60), cw, ch)
+                g2.color = Color(0, 0, 0, 185); g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 16, 16)
+                g2.stroke = BasicStroke(if (rc.contains(mpos)) 3.5f else 2f); g2.color = cols[i]; g2.drawRoundRect(rc.x, rc.y, rc.width, rc.height, 16, 16)
+                txt(g2, "${i + 1}   ${DIFFS[i].name.uppercase()}", rc.x + 16, rc.y + ch * 40 / 100, spaced(Font("SansSerif", Font.BOLD, hh / 28), 0.12f), cols[i], false)
+                txt(g2, DIFFS[i].blurb, rc.x + 16, rc.y + ch * 78 / 100, Font("SansSerif", Font.PLAIN, hh / 50), Color(215, 208, 180), false)
+                hit(rc) { pickDifficulty(i) }
+            }
+            val bb = hh / 14
+            btn(g2, Rectangle(cx - 90, hh - bb - hh / 40, 180, bb), "BACK", false, ac) { scr = pickBack }
+        }
+
         fun drawOptions(g2: Graphics2D) {
             val w = width; val hh = height; val cx = w / 2; val ac = Color(levelDef(0).accent)
             dim(g2, 220, 200)
@@ -271,9 +296,10 @@ fun main(args: Array<String>) {
                 Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f), "$nm ($f)", Settings.fov == f) })
             fogR = slider(g2, "FOG", Settings.fogName(), tl, tr, (hh * 0.56).toInt(), (hh * 0.64).toInt(), Settings.fog / 100.0,
                 Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100.0, nm, Settings.fog == f) })
+            if (playing) { // the difficulty belongs to the game being played (chosen when it was started)
             // difficulty
             val dl = (w * 0.64).toInt(); val dw = (w * 0.28).toInt(); val bh = hh / 16; val gp = hh / 100; var y = (hh * 0.34).toInt()
-            txt(g2, "DIFFICULTY", dl, (hh * 0.30).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            txt(g2, "DIFFICULTY  ·  THIS GAME", dl, (hh * 0.30).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
             val cols = arrayOf(Color(150, 200, 150), ac, Color(240, 160, 80), Color(235, 70, 55), Color(110, 210, 200), Color(200, 30, 30))
             for (i in DIFFS.indices) {
                 val lock = playing && (g.hardcoreRun || DIFFS[i].hardcore) // a run in progress keeps its difficulty; Hardcore cannot be switched on mid-run
@@ -281,6 +307,7 @@ fun main(args: Array<String>) {
                 y += bh + gp
             }
             txt(g2, if (playing && g.hardcoreRun) "Hardcore run: difficulty is locked." else DIFFS[Settings.diff].blurb, dl, y + hh / 30, Font("SansSerif", Font.ITALIC, hh / 50), Color(200, 195, 160), false)
+            }
             txt(g2, "drag the sliders  ·  LEFT / RIGHT  fine tune FOV", cx, hh - hh / 7, Font("SansSerif", Font.ITALIC, hh / 56), Color(170, 165, 140))
             val bb = hh / 14
             btn(g2, Rectangle(cx - 90, hh - bb - hh / 40, 180, bb), "BACK", false, ac) { closeOptions() }
@@ -368,9 +395,10 @@ fun main(args: Array<String>) {
         override fun keyPressed(e: KeyEvent) {
             when (e.keyCode) {
                 KeyEvent.VK_ESCAPE -> back()
-                KeyEvent.VK_ENTER -> when (scr) { Scr.MAIN -> openSaves(); Scr.SAVES -> startGame(); Scr.MULTI -> joinServer(); else -> {} }
+                KeyEvent.VK_ENTER -> when (scr) { Scr.MAIN -> openSaves(); Scr.SAVES -> openPicker(0, "", Scr.SAVES); Scr.MULTI -> joinServer(); else -> {} }
                 KeyEvent.VK_BACK_SPACE -> if (scr == Scr.MULTI && ip.isNotEmpty()) ip.setLength(ip.length - 1)
                 KeyEvent.VK_M -> if (scr == Scr.GAME) g.showMap = !g.showMap
+                in KeyEvent.VK_1..KeyEvent.VK_6 -> if (scr == Scr.DIFFICULTY) pickDifficulty(e.keyCode - KeyEvent.VK_1)
                 KeyEvent.VK_E -> if (scr == Scr.GAME) g.eatReq = true
                 KeyEvent.VK_Q -> if (scr == Scr.GAME) g.drinkReq = true
                 KeyEvent.VK_LEFT -> if (scr == Scr.OPTIONS) { Settings.set(Settings.fov - 1); Store.saveProfile() }

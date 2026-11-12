@@ -171,14 +171,14 @@ class Game {
 
     fun newGame(lv: Int = 0) { hardcoreRun = Settings.hardcore; playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
 
-    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT, hardcoreRun)
+    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT, Settings.diff)
 
     /** Resume a save: same level and spot; entities start fresh, 11+ cells away. */
     fun restore(s: SaveData) {
         level = if (levelExists(s.level)) s.level else 0; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
         arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
         a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
-        hardcoreRun = s.hardcore; if (hardcoreRun) Settings.putDiff(HARDCORE_IDX) else if (Settings.hardcore) Settings.putDiff(NIGHTMARE_IDX) // a save carries its mode
+        Settings.putDiff(s.diff); hardcoreRun = Settings.hardcore // a save carries its difficulty
         resetLevelState(); hunger = s.hunger.coerceIn(0.0, 1.0); rations = s.rations.coerceIn(0, 9); water = s.water.coerceIn(0, 9); lobbyT = s.lobbyT.coerceAtLeast(0.0); starveT = 0.0
         remember(level)
         val p = findFree(s.x, s.y); x = p.first; y = p.second

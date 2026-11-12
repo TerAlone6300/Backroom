@@ -3,13 +3,13 @@ package com.backrooms.game
 import kotlin.math.*
 
 // ---------- Menu screens (shared by both clients), settings, saves ----------
-enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME }
+enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME, DIFFICULTY }
 
 object Settings {
     const val FOV_MIN = 30; const val FOV_MAX = 110
     @Volatile var fov = 60
     @Volatile var fog = 100  // % of each level's own fog density (0 = no fog)
-    @Volatile var diff = 1   // index into DIFFS
+    @Volatile var diff = 1   // index into DIFFS: the difficulty of the game being played. Chosen when a game starts and kept in its save, never in the profile
     val FOG_PRESETS = listOf(0 to "Off", 50 to "Light", 100 to "Default")
     val fogScale get() = fog / 100.0
     fun putFog(f: Int) { fog = f.coerceIn(0, 100) }

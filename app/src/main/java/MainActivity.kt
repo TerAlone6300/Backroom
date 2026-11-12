@@ -93,9 +93,13 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     private fun askIp() {
         val et = EditText(act).apply { hint = "192.168.1.5   or   host:port"; setSingleLine() }
         AlertDialog.Builder(act).setTitle("Join server").setView(et)
-            .setPositiveButton("Join") { _, _ -> startGame(et.text.toString().trim()) }
+            .setPositiveButton("Join") { _, _ -> openPicker(0, et.text.toString().trim(), Scr.MAIN) }
             .setNegativeButton("Cancel", null).show()
     }
+
+    // starting a game asks for its difficulty first: the difficulty belongs to the game (and its save), not to the profile
+    private var pendLv = 0; private var pendAddr = ""; private var pickBack = Scr.MAIN
+    private fun openPicker(lv: Int, addr: String, from: Scr) { pendLv = lv; pendAddr = addr; pickBack = from; levelsOpen = false; scr = Scr.DIFFICULTY }
 
     private fun openSaves() { saves = Store.list(); scrollY = 0f; levelsOpen = false; scr = Scr.SAVES }
     private fun openOptions(from: Scr) { optBack = from; levelsOpen = false; scr = Scr.OPTIONS }
@@ -120,6 +124,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             Scr.PAUSE -> scr = Scr.GAME
             Scr.OPTIONS -> closeOptions()
             Scr.SAVES, Scr.MULTI -> scr = Scr.MAIN
+            Scr.DIFFICULTY -> scr = pickBack
             Scr.MAIN -> if (levelsOpen) levelsOpen = false else return false
         }
         return true
@@ -291,7 +296,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
                 pFill.style = Paint.Style.FILL; pFill.color = acc(d) // play triangle
                 val tx = rc.right - 20 * dp; val ty = rc.centerY()
                 c.drawPath(Path().apply { moveTo(tx, ty - 8 * dp); lineTo(tx + 12 * dp, ty); lineTo(tx, ty + 8 * dp); close() }, pFill)
-                hitClip(rc, list) { startGame(lv = d.id) }
+                hitClip(rc, list) { openPicker(d.id, "", Scr.MAIN) }
             }
             c.restore()
         }
@@ -316,7 +321,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         nextScroll = list
         c.save(); c.clipRect(list)
         var y = top - scrollY
-        val nr = RectF(lx, y, lx + lw, y + rhNew); button(c, nr, "NEW GAME", true, a); hitClip(nr, list) { startGame() }
+        val nr = RectF(lx, y, lx + lw, y + rhNew); button(c, nr, "NEW GAME", true, a); hitClip(nr, list) { openPicker(0, "", Scr.SAVES) }
         y += rhNew + gp
         if (saves.isEmpty()) small(c, "No saves yet  ·  use  Save & Quit  in the pause menu", w / 2, y + 16 * dp, 10.5f, Color.rgb(170, 165, 140))
         for (s in saves) {
@@ -356,6 +361,24 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
         return RectF(tl, yTrack - 18 * dp, tr, yTrack + 18 * dp)
     }
 
+    private fun drawPicker(c: Canvas) {
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
+        dim(c, 225, 200)
+        heading(c, "DIFFICULTY", a, h * 0.15f)
+        small(c, "Chosen for this game and kept in its save.", w / 2, h * 0.215f, 10f, Color.rgb(200, 195, 160))
+        val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55), Color.rgb(110, 210, 200), Color.rgb(200, 30, 30))
+        val cw = w * 0.38f; val ch = 54 * dp; val gx = w * 0.04f; val x0 = w / 2 - cw - gx / 2
+        for (i in DIFFS.indices) {
+            val rc = RectF(x0 + (i % 2) * (cw + gx), h * 0.27f + (i / 2) * (ch + 8 * dp), x0 + (i % 2) * (cw + gx) + cw, h * 0.27f + (i / 2) * (ch + 8 * dp) + ch)
+            pFill.style = Paint.Style.FILL; pFill.color = Color.argb(185, 0, 0, 0); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
+            pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 2 * dp; pFill.color = cols[i]; c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
+            small(c, DIFFS[i].name.uppercase(), rc.left + 14 * dp, rc.top + 22 * dp, 14f, cols[i], Paint.Align.LEFT, 0.12f, true)
+            small(c, DIFFS[i].blurb, rc.left + 14 * dp, rc.top + 42 * dp, 9f, Color.rgb(215, 208, 180), Paint.Align.LEFT)
+            hit(rc) { Settings.putDiff(i); startGame(pendAddr, pendLv) }
+        }
+        btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { scr = pickBack }
+    }
+
     private fun drawOptions(c: Canvas) {
         val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         dim(c, 220, 200)
@@ -365,9 +388,10 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f).toFloat(), "$nm ($f)", Settings.fov == f) })
         nextFog = drawSlider(c, "FOG", Settings.fogName(), tl, tr, h * 0.56f, h * 0.64f, Settings.fog / 100f,
             Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100f, nm, Settings.fog == f) })
+        if (playing) { // the difficulty belongs to the game being played (chosen when it was started)
         // difficulty
         val dl = w * 0.64f; val dr = w * 0.92f; val bh = 22 * dp; val gp = 4 * dp; var y = h * 0.34f
-        small(c, "DIFFICULTY", dl, h * 0.30f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
+        small(c, "DIFFICULTY  ·  THIS GAME", dl, h * 0.30f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
         val cols = intArrayOf(Color.rgb(150, 200, 150), a, Color.rgb(240, 160, 80), Color.rgb(235, 70, 55), Color.rgb(110, 210, 200), Color.rgb(200, 30, 30))
         for (i in DIFFS.indices) {
             val rc = RectF(dl, y, dr, y + bh); val lock = playing && (g.hardcoreRun || DIFFS[i].hardcore) // a run in progress keeps its difficulty; Hardcore cannot be switched on mid-run
@@ -375,6 +399,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             y += bh + gp
         }
         small(c, if (playing && g.hardcoreRun) "Hardcore run: difficulty is locked." else DIFFS[Settings.diff].blurb, dl, y + 8 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
+        }
         btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
     }
 
@@ -528,6 +553,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
                     Scr.PAUSE -> drawPause(c)
                     Scr.SAVES -> drawSaves(c)
                     Scr.OPTIONS -> drawOptions(c)
+                    Scr.DIFFICULTY -> drawPicker(c)
                     Scr.MAIN -> drawMain(c)
                     else -> {}
                 }
