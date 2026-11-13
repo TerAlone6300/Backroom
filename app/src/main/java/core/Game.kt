@@ -26,9 +26,11 @@ class Game {
     private var scanX = Int.MIN_VALUE; private var scanY = 0
     private class Origin(val level: Int, val x: Double, val y: Double, val a: Double, val pitch: Double, val ents: List<Entity>)
     private var origin: Origin? = null          // Level 139: the dangerous situation you were pulled out of
+    @Volatile var camH = 0.5                 // camera height: 0.5 = standing; Level 139 raises it while you climb the waterfall
     @Volatile var hardcoreRun = false        // this run is Hardcore: the difficulty is locked and death leads to The Grave
     private var warnGrave = false
     private var grace = 0.0                      // seconds after returning from the trial in which nothing can catch you
+    private var stage = 0; private var slipT = 0.0   // Level 139: how far through the trials you got
     private var trialT = 0.0; private var warnTrial = false; private var warnReworked = false
     private var warnHungry = false; private var warnHallu = false; private var warnJerry = false
     private val roomsDone = HashSet<Long>(); private var roomT = 0.0
@@ -39,7 +41,7 @@ class Game {
     /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
     private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
-    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false; warnGrave = false }
+    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false; warnGrave = false; stage = 0; slipT = 0.0; camH = 0.5 }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
     private fun rescan(cx: Int, cy: Int) {
         scanX = cx; scanY = cy
@@ -207,7 +209,8 @@ class Game {
         if (hunger < 0.2 && !warnHungry) { warnHungry = true; say("YOU ARE HUNGRY  ·  find food") } else if (hunger > 0.4) warnHungry = false
         if (run) { stamina -= 0.10 * dif.drain * dt; if (stamina <= 0) { stamina = 0.0; exhausted = true } }
         else { stamina = min(1.0, stamina + 0.20 * dif.regen * (if (hunger < 0.2) 0.6 else 1.0) * dt); if (exhausted && stamina > 0.3) exhausted = false }
-        val speed = (if (run) 4.2 else 2.3) * (if (hunger <= 0.0) 0.85 else 1.0)
+        val onLedge = level == LV_WARRIOR && (Island.cell(floor(x).toInt(), floor(y).toInt()) and Island.C_LEDGE) != 0
+        val speed = (if (run) 4.2 else 2.3) * (if (hunger <= 0.0) 0.85 else 1.0) * (if (onLedge) 0.55 else 1.0) // wet rock: slow going
         move(level, x, y, cos(a) * f - sin(a) * s, sin(a) * f + cos(a) * s, speed * dt).let { x = it.first; y = it.second }
         if (moving) bob += dt * (if (run) 12.0 else 7.5)
         bobAmp += ((if (!moving) 0.0 else if (run) 1.0 else 0.6) - bobAmp) * min(1.0, dt * 8)
@@ -363,22 +366,35 @@ class Game {
         enter(dest, "YOU PASSED THE TRIAL")
     }
     private fun spawnTrial() {
-        entities.add(Entity(2.5, 22.5, E_WARRIOR))
+        entities.add(Entity(2.5, 29.5, E_WARRIOR))
         val n = max(3, (5 * DIFFS[Settings.diff].count).roundToInt())
-        for (k in 0 until n) { val p = Island.tunnelPoint(4.0 + (Island.TUNNEL_LENGTH - 6) * (k + 0.5) / n); entities.add(Entity(p[0], p[1], E_TARANTULA)) }
+        for (k in 0 until n) { val p = Island.tunnelPoint(3.0 + (Island.CAVE_LENGTH - 5) * (k + 0.5) / n); entities.add(Entity(p[0], p[1], E_TARANTULA)) }
     }
     private fun updateTrial(dt: Double) {
         val cx = floor(x).toInt(); val cy = floor(y).toInt(); val r = Island.rad(cx, cy)
         if (r > Island.SEA) { returnFromTrial("YOU TURNED YOUR BACK ON THE TRIAL"); return }
         if (r < Island.LAKE) { completeTrial(); return }
-        if (!Island.tunnel(cx, cy)) return
+        val c = Island.cell(cx, cy)
+        if ((c and Island.C_CAVE) != 0 && stage < 1) { stage = 1; say("TRIAL 1  ·  THE DARK CAVE  ·  tarantulas, tight walls, no light") }
+        if ((c and Island.C_LEDGE) != 0 && stage < 2) { stage = 2; say("TRIAL 2  ·  THE WATERFALL  ·  climb, and do not look down") }
+        if ((c and Island.C_VOLC) != 0 && stage < 3) { stage = 3; say("TRIAL 3  ·  THE VOLCANIC TUNNEL  ·  keep off the lava") }
+        if (r < Island.CRATER && stage < 4) { stage = 4; say("THE SUMMIT  ·  ENTER THE LAKE TO ACCEPT THE TRIAL") }
+        if ((c and Island.C_DROP) != 0) { setBack(Island.LEDGE_START, "YOU SLIPPED AND FELL  ·  START THE CLIMB AGAIN"); return }
+        if ((c and Island.C_LAVA) != 0) { setBack(Island.TUNNEL_START, "YOU STEPPED IN THE LAVA  ·  BACK TO THE TUNNEL MOUTH"); return }
+        // the ledge is slippery and the camera climbs with you
+        val onLedge = (c and Island.C_LEDGE) != 0
+        val target = if (onLedge) 0.5 + 6.0 * Island.ledgeProgress(x, y) else 0.5
+        camH += (target - camH) * min(1.0, dt * 4)
+        if (onLedge) { slipT -= dt; if (slipT <= 0) { slipT = 1.2 + Math.random() * 1.4; val d = max(0.01, hypot(x, y)); val m = move(level, x, y, -x / d, -y / d, 0.14); x = m.first; y = m.second } } else slipT = 1.5
+        if ((c and Island.C_CAVE) == 0) return
         trialT += dt
         if (trialT > 14 && (trialT - 14) % 16 < dt && entities.count { it.type == E_TARANTULA } < 8) { // the Warrior reworks the cave: another spider ahead of you
             if (!warnReworked) { warnReworked = true; say("THE WARRIOR REWORKS THE CAVE AROUND YOU") }
-            for (i in 0 until 20) { val p = Island.tunnelPoint(Math.random() * Island.TUNNEL_LENGTH)
+            for (i in 0 until 20) { val p = Island.tunnelPoint(Math.random() * Island.CAVE_LENGTH)
                 if (hypot(p[0] - x, p[1] - y) in 7.0..13.0) { entities.add(Entity(p[0], p[1], E_TARANTULA)); break } }
         }
     }
+    private fun setBack(p: DoubleArray, msg: String) { x = p[0]; y = p[1]; camH = 0.5; grace = 1.0; slipT = 1.0; say(msg) }
 
     /** Level 2: when a cult room comes within 40 cells, Jerry and six cultists appear in it (once per visit). */
     private fun updateRooms(dt: Double) {

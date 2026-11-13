@@ -68,13 +68,13 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         return pack((((a shr 16) and 255) * u + ((b shr 16) and 255) * t) shr 8, (((a shr 8) and 255) * u + ((b shr 8) and 255) * t) shr 8, ((a and 255) * u + (b and 255) * t) shr 8) }
 
     /** City rows: above the horizon the star sky (no ceiling), below it street, sidewalk, grass, hazing into the horizon glow. */
-    private fun openRows(ow: OpenWorld, px: IntArray, lp: Lamps, r0: Int, r1: Int, hz: Int, vs: Double, fk: Double, gl: Double, t: Double,
+    private fun openRows(ow: OpenWorld, px: IntArray, lp: Lamps, r0: Int, r1: Int, hz: Int, vs: Double, ch: Double, fk: Double, gl: Double, t: Double,
                          x: Double, y: Double, dx: Double, dy: Double, plX: Double, plY: Double, d: LevelDef, ts: TexSet) {
         val sky = ow.sky; val tn = d.tint; val roof = ow.roofed(floor(x).toInt(), floor(y).toInt())
         for (yy in r0 until r1) {
             val dr = yy - hz
             if (dr <= 0) { if (roof) for (xx in 0 until W) px[yy * W + xx] = ow.roofColor else { val base = rowV[yy] * 2048; for (xx in 0 until W) px[yy * W + xx] = sky[base + colU[xx]] }; continue }
-            val rd = 0.5 * H * vs / dr
+            val rd = ch * H * vs / dr // ch = camera height (0.5 = standing; higher on the waterfall)
             val fog = 1.0 / (1 + rd * rd * fk)
             val ha = ((1.0 - 1.0 / (1 + rd * rd * ow.hazeK * Settings.fogScale)) * 256).toInt() // distance haze
             for (xx in 0 until W) {
@@ -89,7 +89,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
     }
 
     /** One city column. The ray keeps going past low buildings so taller ones behind show above them; hits are drawn far to near. */
-    private fun openCol(ow: OpenWorld, lv: Int, px: IntArray, xx: Int, lp: Lamps, x: Double, y: Double, rx: Double, ry: Double, hz: Int, vs: Double, fk: Double, gl: Double, t: Double, d: LevelDef) {
+    private fun openCol(ow: OpenWorld, lv: Int, px: IntArray, xx: Int, lp: Lamps, x: Double, y: Double, rx: Double, ry: Double, hz: Int, vs: Double, ch: Double, fk: Double, gl: Double, t: Double, d: LevelDef) {
         var mapX = floor(x).toInt(); var mapY = floor(y).toInt()
         val ddx = abs(1 / rx); val ddy = abs(1 / ry)
         val stepX = if (rx < 0) -1 else 1; val stepY = if (ry < 0) -1 else 1
@@ -102,7 +102,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val ht = ow.height(mapX, mapY)
             val pp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
             val lh = (H * vs / pp).toInt().coerceAtLeast(1)
-            val top = hz + lh / 2 - lh * ht
+            val top = hz + (lh * ch).toInt() - lh * ht
             if (top < topBest) { lp.hmx[cnt] = mapX; lp.hmy[cnt] = mapY; lp.hsd[cnt] = side; lp.hht[cnt] = ht; lp.hpp[cnt] = pp; topBest = top; cnt++ }
             if (top <= 0 || cnt == 8) break
         }
@@ -121,7 +121,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val kr = kk * tn[0]; val kg = kk * tn[1]; val kb = kk * tn[2]; val er = ke * tn[0]; val eg = ke * tn[1]; val eb = ke * tn[2]
             val ha = ((1.0 - 1.0 / (1 + pp * pp * ow.hazeK * Settings.fogScale)) * 256).toInt()
             val lh = (H * vs / pp).toInt().coerceAtLeast(1)
-            val bottom = hz + lh / 2; val top = bottom - lh * ht
+            val bottom = hz + (lh * ch).toInt(); val top = bottom - lh * ht
             val y0 = max(0, top); val y1 = min(H - 1, bottom)
             val step = 64.0 / lh; var tpos = (y0 - top) * step
             val style = ow.style(mx, my); val unst = unstable(lv, mx, my)
@@ -287,14 +287,14 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         val fk = d.fogK * Settings.fogScale // Options > Fog scales every level's own fog
 
         // floor + ceiling (rows are split between threads)
-        val ow = spec.world
+        val ow = spec.world; val ch = g.camH
         if (ow != null) { // open sky: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
             for (xx in 0 until W) colU[xx] = (((atan2(dy + plY * camX[xx], dx + plX * camX[xx]) / (2 * PI)) * 2048).toInt()) and 2047
             for (yy in 0 until min(H, hz + 1)) rowV[yy] = (atan((hz - yy) / (H * vs)) / (PI / 2) * 255).toInt().coerceIn(0, 255)
         }
         par(H) { b, r0, r1 ->
             val lp = bands[b]
-            if (ow != null) { openRows(ow, px, lp, r0, r1, hz, vs, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
+            if (ow != null) { openRows(ow, px, lp, r0, r1, hz, vs, ch, fk, gl, t, x, y, dx, dy, plX, plY, d, ts); return@par }
             for (yy in r0 until r1) {
                 val dr = yy - hz
                 if (dr == 0) { for (xx in 0 until W) px[yy * W + xx] = pack(8, 6, 4); continue }
@@ -319,7 +319,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
         // textured walls (DDA; columns are split between threads)
         par(W) { b, c0, c1 ->
             val lp = bands[b]
-            if (ow != null) { for (xx in c0 until c1) openCol(ow, lv, px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, fk, gl, t, d); return@par }
+            if (ow != null) { for (xx in c0 until c1) openCol(ow, lv, px, xx, lp, x, y, dx + plX * camX[xx], dy + plY * camX[xx], hz, vs, ch, fk, gl, t, d); return@par }
             for (xx in c0 until c1) {
                 val cx = camX[xx]
                 val rx = dx + plX * cx; val ry = dy + plY * cx
@@ -382,7 +382,7 @@ class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime
             val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
-            val bottom = hz + (full / 2).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly
+            val bottom = hz + (full * ch).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly
             val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 20) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
             for (col in max(0, sx - sw / 2)..min(W - 1, sx + sw / 2)) {
                 if (ty >= zb[col]) continue
