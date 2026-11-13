@@ -126,4 +126,4 @@ Trò chơi tích hợp nhiều phương pháp tối ưu hóa kết xuất hình 
 
 ## Giấy phép
 
-Chưa có ở đây
+`GPL-3.0-only` kể từ v1.0.28
