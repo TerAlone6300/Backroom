@@ -45,6 +45,7 @@ object Store {
                 val p = load(f)
                 p.getProperty("fov")?.toIntOrNull()?.let { Settings.set(it) }
                 p.getProperty("fog")?.toIntOrNull()?.let { Settings.putFog(it) }
+                p.getProperty("renderer")?.toIntOrNull()?.let { Settings.renderer = it.coerceIn(R_CANVAS, R_VULKAN) }
                 val legacy = p.getProperty("ids") != "2"
                 p.getProperty("found")?.split(",")?.forEach { s -> s.trim().toIntOrNull()?.let { Progress.load(if (legacy) legacyId(it) else it) } }
             }
@@ -55,7 +56,7 @@ object Store {
         val d = dir ?: return
         runCatching {
             put(File(d, "profile.properties"), java.util.Properties().apply {
-                setProperty("fov", Settings.fov.toString()); setProperty("fog", Settings.fog.toString())
+                setProperty("fov", Settings.fov.toString()); setProperty("fog", Settings.fog.toString()); setProperty("renderer", Settings.renderer.toString())
                 setProperty("ids", "2"); setProperty("found", Progress.all().joinToString(","))
             })
         }

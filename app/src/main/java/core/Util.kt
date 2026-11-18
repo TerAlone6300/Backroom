@@ -3,6 +3,9 @@ package com.backrooms.game
 
 const val SEED = 1337
 const val PORT = 7777
+/** Size of the frame the Renderer draws (always 16:9). Every client scales it to its screen. */
+const val FRAME_W = 1920
+const val FRAME_H = 1080
 
 fun h(x: Int, y: Int, s: Int): Double {
     var n = x * 374761393 + y * 668265263 + s * 1274126177 + SEED

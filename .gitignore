@@ -2,3 +2,5 @@ build/
 .gradle/
 *.jar
 local.properties
+
+tools/vk-host-test/vk-host-test

@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.*
 import android.widget.EditText
+import android.widget.FrameLayout
 import java.io.File
 import kotlin.math.*
 
@@ -22,8 +23,10 @@ class MainActivity : Activity() {
         Store.init(File(filesDir, "backrooms"))
         updates = UpdateHelper(this); updates.loadVersion()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        view = GameView(this)
-        setContentView(view)
+        val frame = GpuFrameView(this)   // OpenGL ES / Vulkan surface; GameView is a transparent overlay on top of it
+        val game = GameView(this, frame)
+        view = game
+        setContentView(FrameLayout(this).apply { addView(frame); addView(game) })
         updates.check() // every launch: is there a newer release?
     }
 
@@ -39,7 +42,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() { if (view?.back() != true) super.onBackPressed() }
 }
 
-class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Callback, Runnable {
+class GameView(private val act: Activity, private val gpu: GpuFrameView) : SurfaceView(act), SurfaceHolder.Callback, Runnable {
     private val r = Renderer()
     private val px = IntArray(r.W * r.H)
     private val bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
@@ -64,7 +67,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     @Volatile private var fovR: RectF? = null; @Volatile private var fogR: RectF? = null; @Volatile private var scrollR: RectF? = null
     private var nextFov: RectF? = null; private var nextFog: RectF? = null; private var nextScroll: RectF? = null
     private var menuDown = false; private var slideId = 0 /* 0 none, 1 FOV, 2 fog */; private var dragged = false
-    private var hw = Build.VERSION.SDK_INT >= 23 // draw on a hardware canvas: the GPU scales the 480x270 frame instead of the CPU
+    private var hw = Build.VERSION.SDK_INT >= 23 // draw on a hardware canvas: the GPU scales the frame instead of the CPU
     private var dX = 0f; private var dY = 0f; private var lastY = 0f
 
     private val dp = resources.displayMetrics.density
@@ -78,7 +81,11 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     private var lx0 = 0f; private var ly0 = 0f; private var rx0 = 0f; private var ry0 = 0f
     private val jr get() = 55 * dp
 
-    init { holder.addCallback(this) }
+    init {
+        holder.addCallback(this)
+        setZOrderMediaOverlay(true); holder.setFormat(PixelFormat.TRANSLUCENT) // transparent: the GPU frame shows through underneath
+        gpu.visibility = if (Settings.renderer == R_CANVAS) View.GONE else View.VISIBLE
+    }
 
     private fun acc(d: LevelDef, alpha: Int = 255) = Color.argb(alpha, (d.accent shr 16) and 255, (d.accent shr 8) and 255, d.accent and 255)
 
@@ -109,6 +116,7 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
     private fun openSaves() { saves = Store.list(); scrollY = 0f; levelsOpen = false; scr = Scr.SAVES }
     private fun openOptions(from: Scr) { optBack = from; levelsOpen = false; scr = Scr.OPTIONS }
     private fun closeOptions() { Store.saveProfile(); scr = optBack }
+    private fun setRenderer(k: Int) { Settings.renderer = k; Store.saveProfile(); gpu.post { gpu.visibility = if (k == R_CANVAS) View.GONE else View.VISIBLE } }
     private fun openPause() { leftId = -1; rightId = -1; jx = 0f; jy = 0f; scr = Scr.PAUSE }
 
     private fun saveAndQuit() {
@@ -393,6 +401,13 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
             Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f).toFloat(), "$nm ($f)", Settings.fov == f) })
         nextFog = drawSlider(c, "FOG", Settings.fogName(), tl, tr, h * 0.56f, h * 0.64f, Settings.fog / 100f,
             Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100f, nm, Settings.fog == f) })
+        small(c, "RENDERER", tl, h * 0.755f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
+        val rw = (tr - tl - 2 * 6 * dp) / 3f; val ry = h * 0.775f; var rx = tl
+        for (i in RENDERER_NAMES.indices) {
+            btn(c, RectF(rx, ry, rx + rw, ry + 22 * dp), RENDERER_NAMES[i].uppercase(), Settings.renderer == i, a) { setRenderer(i) }
+            rx += rw + 6 * dp
+        }
+        small(c, gpu.statusLine(Settings.renderer), tl, ry + 34 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
         if (playing) { // the difficulty belongs to the game being played (chosen when it was started)
         // difficulty
         val dl = w * 0.64f; val dr = w * 0.92f; val bh = 22 * dp; val gp = 4 * dp; var y = h * 0.34f
@@ -548,10 +563,11 @@ class GameView(private val act: Activity) : SurfaceView(act), SurfaceHolder.Call
                 }
                 r.render(px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME)
             }
-            bmp.setPixels(px, 0, r.W, 0, 0, r.W, r.H)
+            val onGpu = gpu.present(px, r.W, r.H, Settings.renderer) // true: the frame is on the GPU surface under this one
+            if (!onGpu) bmp.setPixels(px, 0, r.W, 0, 0, r.W, r.H)
             val c = lock() ?: continue
             try {
-                c.drawBitmap(bmp, null, Rect(0, 0, c.width, c.height), bmpPaint)
+                if (onGpu) c.drawColor(0, PorterDuff.Mode.CLEAR) else c.drawBitmap(bmp, null, Rect(0, 0, c.width, c.height), bmpPaint)
                 cur = ArrayList(); nextFov = null; nextFog = null; nextScroll = null
                 when (scr) {
                     Scr.GAME -> drawHud(c)

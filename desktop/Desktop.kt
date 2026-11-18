@@ -10,6 +10,7 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.*
 import kotlin.math.*
+import kotlin.system.exitProcess
 
 private fun txt(g2: Graphics2D, s: String, x0: Int, y: Int, f: Font, col: Color, center: Boolean = true) {
     g2.font = f
@@ -33,7 +34,27 @@ private fun wrap(fm: FontMetrics, s: String, maxW: Int): List<String> {
 @Volatile private var scr = Scr.MAIN
 @Volatile private var playing = false // a game session exists (running or paused)
 
-fun main(args: Array<String>) {
+/**
+ * --zink: draw through Mesa's Zink (OpenGL implemented on top of Vulkan) by running Java2D's OpenGL pipeline on it.
+ * Mesa reads its settings from the process environment at start-up and a JVM cannot change its own, so this starts the
+ * game again as a child process with them set. Linux with Mesa (zink + a Vulkan driver) only. false = could not, carry on normally.
+ */
+private fun relaunchOnZink(args: Array<String>): Boolean {
+    if (!System.getProperty("os.name").lowercase().contains("linux")) { System.err.println("--zink needs Linux with Mesa; starting normally."); return false }
+    val java = ProcessHandle.current().info().command().orElse("java")
+    // sun.java2d.opengl=True (capital T) makes Java print "OpenGL pipeline enabled ..." when it took effect
+    val cmd = listOf(java, "-Dsun.java2d.opengl=True", "-cp", System.getProperty("java.class.path"), "com.backrooms.game.DesktopKt") + args
+    val pb = ProcessBuilder(cmd).inheritIO()
+    pb.environment().apply {
+        put("MESA_LOADER_DRIVER_OVERRIDE", "zink"); put("GALLIUM_DRIVER", "zink"); put("__GLX_VENDOR_LIBRARY_NAME", "mesa")
+        put("BACKROOMS_ZINK", "1") // marks the child so it does not relaunch again
+    }
+    return try { exitProcess(pb.start().waitFor()) } catch (e: java.io.IOException) { System.err.println("--zink: could not start the game again (${e.message}); starting normally."); false }
+}
+
+fun main(argv: Array<String>) {
+    val args = argv.filter { it != "--zink" }.toTypedArray()
+    if ("--zink" in argv && System.getenv("BACKROOMS_ZINK") == null && args.firstOrNull() != "server") relaunchOnZink(args)
     if (args.firstOrNull() == "server") return server(args.getOrNull(1)?.toInt() ?: PORT)
     if (args.firstOrNull() == "--apply-update") { // started by the old process after an update: this jar is the new one; copy it over the old file and start from there
         val me = runningJar(); if (me != null && args.size > 1 && applyUpdate(File(args[1]), me)) return

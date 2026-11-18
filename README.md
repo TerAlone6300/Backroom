@@ -124,6 +124,22 @@ Trò chơi tích hợp nhiều phương pháp tối ưu hóa kết xuất hình 
 - Tối ưu hóa quy trình kết xuất hình ảnh.
 - Hỗ trợ kết xuất Canvas bằng tăng tốc phần cứng trên các phiên bản Android tương thích.
 
+## Bộ kết xuất
+
+Khung hình được vẽ trên CPU với độ phân giải 1920×1080 (`FRAME_W` × `FRAME_H` trong `core/Util.kt`), rồi hiển thị lên màn hình bằng một trong các cách sau.
+
+**Android** (Options → RENDERER, mặc định là Canvas):
+
+- **Canvas**: cách cũ, hoạt động trên mọi máy.
+- **OpenGL ES**: GPU phóng khung hình lên màn hình (`gpu/GlesPresenter.kt`).
+- **Vulkan**: như trên nhưng qua Vulkan (`app/src/main/cpp`, nạp `libvulkan` lúc chạy nên `minSdk` vẫn là 21).
+
+Nếu backend được chọn không khởi động được, trò chơi tự quay về Canvas và Options hiển thị lý do.
+
+**Desktop** (Linux + Mesa): `java -jar backrooms.jar --zink` chạy pipeline OpenGL của Java2D trên Zink (OpenGL chạy trên Vulkan). Nếu GPU của bạn chỉ có Vulkan CPU như lavapipe, đặt thêm `LIBGL_ALWAYS_SOFTWARE=1`.
+
+**Kiểm thử backend Vulkan trên máy tính**: `tools/vk-host-test/run.sh [rộng cao]` chạy cùng mã C++ với bản Android trên X11, rồi đọc lại cửa sổ để kiểm tra màu, chiều ảnh, đổi kích thước và tạo lại bề mặt. Cần `libvulkan-dev`, `libx11-dev` và một driver Vulkan (`mesa-vulkan-drivers`). Sau khi sửa shader trong `app/src/main/cpp/shaders`, chạy `compile_shaders.sh` (cần `glslang-tools`) để cập nhật `vk_shaders.h`.
+
 ## Giấy phép
 
 `GPL-3.0-only` kể từ v1.0.28

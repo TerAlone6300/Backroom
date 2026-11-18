@@ -43,4 +43,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // Vulkan backend (C++). libvulkan is loaded at run time, so minSdk stays 21 and a device without Vulkan just falls back.
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }

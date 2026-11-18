@@ -5,10 +5,15 @@ import kotlin.math.*
 // ---------- Menu screens (shared by both clients), settings, saves ----------
 enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME, DIFFICULTY }
 
+/** Settings.renderer values: the frame drawn by Canvas, by OpenGL ES, or by Vulkan. */
+const val R_CANVAS = 0; const val R_GLES = 1; const val R_VULKAN = 2
+val RENDERER_NAMES = listOf("Canvas", "OpenGL ES", "Vulkan")
+
 object Settings {
     const val FOV_MIN = 30; const val FOV_MAX = 110
     @Volatile var fov = 60
     @Volatile var fog = 100  // % of each level's own fog density (0 = no fog)
+    @Volatile var renderer = R_CANVAS // how the Android client puts the frame on screen (desktop ignores it)
     @Volatile var diff = 1   // index into DIFFS: the difficulty of the game being played. Chosen when a game starts and kept in its save, never in the profile
     val FOG_PRESETS = listOf(0 to "Off", 50 to "Light", 100 to "Default")
     val fogScale get() = fog / 100.0

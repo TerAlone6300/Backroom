@@ -8,7 +8,7 @@ private val SINT = DoubleArray(4096) { sin(it * 2 * PI / 4096) }
 private fun fsin(x: Double) = SINT[(x * (4096 / (2 * PI))).toInt() and 4095]
 
 /** Floor/ceiling rows, wall columns and the post pass are split over up to `threads` threads (the caller works too). */
-class Renderer(val W: Int = 480, val H: Int = 270, threads: Int = min(4, Runtime.getRuntime().availableProcessors())) {
+class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4, Runtime.getRuntime().availableProcessors())) {
     private val zb = DoubleArray(W)
     private val vig = IntArray(W * H)
     private val camX = DoubleArray(W) { 2.0 * it / W - 1 }
