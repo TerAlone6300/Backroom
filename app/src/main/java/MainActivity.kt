@@ -15,14 +15,19 @@ import kotlin.math.*
 
 class MainActivity : Activity() {
     private var view: GameView? = null
+    private lateinit var updates: UpdateHelper
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         Store.init(File(filesDir, "backrooms"))
+        updates = UpdateHelper(this); updates.loadVersion()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         view = GameView(this)
         setContentView(view)
+        updates.check() // every launch: is there a newer release?
     }
+
+    override fun onResume() { super.onResume(); updates.onResume() }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)

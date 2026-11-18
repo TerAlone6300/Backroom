@@ -9,6 +9,10 @@ val ksPass: String? = System.getenv("KEYSTORE_PASSWORD")
 val ksAlias: String? = System.getenv("KEY_ALIAS")
 val keyPass: String? = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotEmpty() } ?: ksPass
 
+// The workflow passes -PappVersionCode=<run number> -PappVersionName=1.0.<run number>, the same number as the release tag (the in-game update check compares them).
+val vCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 1
+val vName = (project.findProperty("appVersionName") as String?) ?: "1.0.0-dev"
+
 android {
     namespace = "com.backrooms.game"
     compileSdk = 34
@@ -16,8 +20,8 @@ android {
         applicationId = "com.backrooms.game"
         minSdk = 21
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = vCode
+        versionName = vName
     }
     signingConfigs {
         if (ksPath != null) {

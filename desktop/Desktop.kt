@@ -35,6 +35,10 @@ private fun wrap(fm: FontMetrics, s: String, maxW: Int): List<String> {
 
 fun main(args: Array<String>) {
     if (args.firstOrNull() == "server") return server(args.getOrNull(1)?.toInt() ?: PORT)
+    if (args.firstOrNull() == "--apply-update") { // started by the old process after an update: this jar is the new one; copy it over the old file and start from there
+        val me = runningJar(); if (me != null && args.size > 1 && applyUpdate(File(args[1]), me)) return
+    }
+    loadDesktopVersion()
     Store.init(File(System.getProperty("user.home"), ".backrooms"))
 
     val r = Renderer()
@@ -434,6 +438,7 @@ fun main(args: Array<String>) {
         defaultCloseOperation = JFrame.EXIT_ON_CLOSE; add(panel); pack(); setLocationRelativeTo(null); isVisible = true
     }
     panel.requestFocusInWindow()
+    startUpdateCheck { frame } // in the background: asks GitHub Releases whether a newer build exists
 
     var last = System.nanoTime(); var t = 0.0; var lastSend = 0L
     while (true) {
