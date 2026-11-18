@@ -17,6 +17,9 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     private var spec: LevelSpec = Level00Threshold; private var zonesOn = false
     private var lpx = 0.0; private var lpy = 0.0; private var lant = 0.0; private var pres = 0.0
     private val nt = max(1, threads)
+    /** Pixel-sized effects (HUD, head bob, glitch, sway) were drawn for a 270-line frame: this scales them to H. */
+    private val ps = H / 270.0
+    private fun u(n: Int) = (n * ps).roundToInt()
     private val pool = if (nt > 1) java.util.concurrent.Executors.newFixedThreadPool(nt - 1) { r -> Thread(r).also { it.isDaemon = true } } else null
 
     /** Per-thread lamp memo: a lamp's brightness (flicker) is worked out once per frame instead of once per pixel. */
@@ -279,7 +282,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         val x = g.x; val y = g.y; val a = g.a
         spec = levelSpec(lv); zonesOn = spec.zones; for (b in bands) b.zx = Int.MIN_VALUE
         frame++; lpx = x; lpy = y; lant = d.lantern; pres = g.presence
-        val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 + g.pitch * H * 0.5).toInt()
+        val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 * ps + g.pitch * H * 0.5).toInt()
         val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.985) 0.75 else 1.0 // very rare, mild global flicker
         val dx = cos(a); val dy = sin(a)
         val pl = tan(Math.toRadians(Settings.fov / 2.0)); val vs = 0.66 / pl // camera plane length from FOV; vs keeps heights in proportion
@@ -422,7 +425,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             var q = grain
             repeat((gk * 50).toInt() + 1) {
                 q = q * 1664525 + 1013904223; val row = ((q ushr 8) and 0xFFFF) % H
-                q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * gk * 0.35).toInt()
+                q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * gk * 0.35 * ps).toInt()
                 if (sh != 0) {
                     val base = row * W; val tmp = px.copyOfRange(base, base + W)
                     for (i in 0 until W) px[base + (((i + sh) % W) + W) % W] = tmp[i]
@@ -431,7 +434,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         }
 
         if (g.halluc > 0.04) { // hallucination: the picture sways from side to side
-            val amp = g.halluc * 5.0
+            val amp = g.halluc * 5.0 * ps
             for (row in 0 until H) {
                 val sh = (sin(row * 0.11 + t * 2.3) * amp + sin(row * 0.047 - t * 1.1) * amp * 0.6).toInt()
                 if (sh == 0) continue
@@ -447,23 +450,23 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     // ---------- shape-only HUD (text is drawn by each platform) ----------
     private fun drawHud(px: IntArray, g: Game, others: Collection<DoubleArray>) {
         if (g.showMap && !levelDef(g.level).isolated) { // no maps on isolated levels
-            val R = 8; val cs = 3; val size = (2 * R + 1) * cs
-            val ox = W - size - 8; val oy = 8
+            val R = 8; val cs = u(3); val size = (2 * R + 1) * cs
+            val ox = W - size - u(8); val oy = u(8)
             val fx = floor(g.x).toInt(); val fy = floor(g.y).toInt()
-            rect(px, ox - 2, oy - 2, size + 4, size + 4, pack(0, 0, 0), 150)
+            rect(px, ox - u(2), oy - u(2), size + u(4), size + u(4), pack(0, 0, 0), 150)
             val ac = levelDef(g.level).accent
             for (cy in -R..R) for (cx in -R..R)
                 if (isWall(g.level, fx + cx, fy + cy)) rect(px, ox + (cx + R) * cs, oy + (cy + R) * cs, cs, cs, pack((ac shr 16) and 255, (ac shr 8) and 255, ac and 255), 210)
             for (o in others) if (o.size > 2 && o[2].toInt() == g.level && abs(o[0] - g.x) < R && abs(o[1] - g.y) < R)
-                rect(px, ox + ((o[0] - fx + R) * cs).toInt() - 1, oy + ((o[1] - fy + R) * cs).toInt() - 1, 3, 3, pack(230, 60, 40), 256)
+                rect(px, ox + ((o[0] - fx + R) * cs).toInt() - u(1), oy + ((o[1] - fy + R) * cs).toInt() - u(1), u(3), u(3), pack(230, 60, 40), 256)
             val pxx = ox + ((g.x - fx + R) * cs).toInt(); val pyy = oy + ((g.y - fy + R) * cs).toInt()
-            for (k in 2..6) rect(px, pxx + (cos(g.a) * k).toInt(), pyy + (sin(g.a) * k).toInt(), 1, 1, pack(255, 255, 255), 200)
-            rect(px, pxx - 1, pyy - 1, 3, 3, pack(255, 255, 255), 256)
+            for (k in 2..6) rect(px, pxx + (cos(g.a) * k * ps).toInt(), pyy + (sin(g.a) * k * ps).toInt(), u(1), u(1), pack(255, 255, 255), 200)
+            rect(px, pxx - u(1), pyy - u(1), u(3), u(3), pack(255, 255, 255), 256)
         }
         if (g.stamina < 0.999) {
-            val bw = 90; val bx = (W - bw) / 2; val by = H - 16
-            rect(px, bx - 2, by - 2, bw + 4, 8, pack(0, 0, 0), 150)
-            rect(px, bx, by, (bw * g.stamina).toInt(), 4, if (g.exhausted) pack(210, 60, 40) else pack(240, 225, 140), 240)
+            val bw = u(90); val bx = (W - bw) / 2; val by = H - u(16)
+            rect(px, bx - u(2), by - u(2), bw + u(4), u(8), pack(0, 0, 0), 150)
+            rect(px, bx, by, (bw * g.stamina).toInt(), u(4), if (g.exhausted) pack(210, 60, 40) else pack(240, 225, 140), 240)
         }
     }
 }
