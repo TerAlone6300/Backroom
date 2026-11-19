@@ -139,6 +139,9 @@ Nếu backend được chọn không khởi động được, trò chơi tự qu
 **Desktop** (Linux + Mesa): `java -jar backrooms.jar --zink` chạy pipeline OpenGL của Java2D trên Zink (OpenGL chạy trên Vulkan). Nếu GPU của bạn chỉ có Vulkan CPU như lavapipe, đặt thêm `LIBGL_ALWAYS_SOFTWARE=1`.
 
 **Kiểm thử backend Vulkan trên máy tính**: `tools/vk-host-test/run.sh [rộng cao]` chạy cùng mã C++ với bản Android trên X11, rồi đọc lại cửa sổ để kiểm tra màu, chiều ảnh, đổi kích thước và tạo lại bề mặt. Cần `libvulkan-dev`, `libx11-dev` và một driver Vulkan (`mesa-vulkan-drivers`). Sau khi sửa shader trong `app/src/main/cpp/shaders`, chạy `compile_shaders.sh` (cần `glslang-tools`) để cập nhật `vk_shaders.h`.
+## Links & Social 
+ 
+- Discord: https://discord.gg/DfpyAs9TaZ
 
 ## Giấy phép
 
