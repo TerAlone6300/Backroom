@@ -143,6 +143,29 @@ Nếu backend được chọn không khởi động được, trò chơi tự qu
  
 - Discord: https://discord.gg/DfpyAs9TaZ
 
-## Giấy phép
+## Giấy phép, danh đề và ghi công
 
-`GPL-3.0-only` kể từ v1.0.28
+### Giấy phép
+
+Mã nguồn của **Backrooms** được phát hành theo giấy phép **GNU General Public License v3.0 (GPL-3.0-only)**.
+
+Các nội dung bên thứ ba được sử dụng trong dự án, bao gồm cấp độ (Level), hình ảnh, âm thanh, tài liệu và các tài nguyên khác, có thể được áp dụng giấy phép riêng. Những nội dung này không mặc nhiên thuộc giấy phép của mã nguồn.
+
+Đối với các cấp độ được lấy từ Backrooms Wikidot, giấy phép và điều kiện sử dụng được áp dụng theo giấy phép của từng nội dung gốc. Các nội dung thuộc **Creative Commons Attribution-ShareAlike 3.0 (CC BY-SA 3.0)** sẽ được ghi nhận và phân phối theo đúng các điều kiện của giấy phép đó.
+
+### Danh đề và ghi công
+
+Backrooms xin ghi nhận công sức sáng tạo của cộng đồng Backrooms, đặc biệt là những tác giả đã đóng góp các cấp độ, ý tưởng, hình ảnh và nội dung được sử dụng làm nguồn cảm hứng hoặc đưa vào trò chơi.
+
+- **Backrooms Wikidot:** Nguồn tham khảo cho các cấp độ và nội dung thuộc vũ trụ Backrooms.
+- **Các tác giả gốc:** Được ghi nhận theo tên tác giả và liên kết đến tác phẩm gốc khi có sử dụng nội dung của họ.
+- **Các cộng tác viên:** Ghi nhận những cá nhân đã đóng góp mã nguồn, sửa lỗi, cải thiện hiệu năng và phát triển trò chơi.
+- **Cộng đồng Backrooms:** Cảm ơn cộng đồng đã xây dựng, mở rộng và duy trì thế giới Backrooms.
+
+Danh sách chi tiết các nội dung bên thứ ba, tác giả, nguồn gốc và giấy phép tương ứng sẽ được ghi nhận trong tài liệu `THIRD_PARTY_LICENSES.md` (nếu có).
+
+### Tuyên bố miễn trừ
+
+**Backrooms** là dự án do cộng đồng phát triển, lấy cảm hứng từ vũ trụ Backrooms. Dự án không tuyên bố sở hữu các tác phẩm, ý tưởng hoặc tài sản trí tuệ thuộc về những tác giả và tổ chức khác.
+
+Mọi quyền đối với nội dung của bên thứ ba vẫn thuộc về chủ sở hữu tương ứng.
