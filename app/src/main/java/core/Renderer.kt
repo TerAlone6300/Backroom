@@ -46,6 +46,9 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     private val colU = IntArray(W); private val rowV = IntArray(H) // city sky lookup: azimuth per column, elevation per row
 
     /** body(band, from, to) over [0, n) in `nt` slices; the last slice runs on the calling thread. */
+    /** Stops the worker threads. Call it when this Renderer is replaced (the frame size changed). */
+    fun close() { pool?.shutdown() }
+
     private fun par(n: Int, body: (Int, Int, Int) -> Unit) {
         val p = pool
         if (p == null) { body(0, 0, n); return }

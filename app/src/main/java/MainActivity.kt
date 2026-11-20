@@ -43,15 +43,16 @@ class MainActivity : Activity() {
 }
 
 class GameView(private val act: Activity, private val gpu: GpuFrameView) : SurfaceView(act), SurfaceHolder.Callback, Runnable {
-    private val r = Renderer()
-    private val px = IntArray(r.W * r.H)
-    private val bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
+    private var r = Renderer(Settings.frameW, Settings.frameH)  // replaced (on the render thread) when the frame size changes
+    private var px = IntArray(r.W * r.H)
+    private var bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
     private val bmpPaint = Paint().apply { isFilterBitmap = true }
     private val g = Game(); private val menuG = Game()
     private var net: Net? = null
     @Volatile private var scr = Scr.MAIN
     @Volatile private var playing = false // a game session exists (running or paused)
     private var optBack = Scr.MAIN
+    private var optPage = 0 // 0 = Options, 1 = its Graphics page
     private var slot: String? = null      // save slot of the running game (null = not saved yet)
     @Volatile private var running = false
     private var thread: Thread? = null
@@ -114,7 +115,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
     private fun openPicker(lv: Int, addr: String, from: Scr) { pendLv = lv; pendAddr = addr; pickBack = from; levelsOpen = false; scr = Scr.DIFFICULTY }
 
     private fun openSaves() { saves = Store.list(); scrollY = 0f; levelsOpen = false; scr = Scr.SAVES }
-    private fun openOptions(from: Scr) { optBack = from; levelsOpen = false; scr = Scr.OPTIONS }
+    private fun openOptions(from: Scr) { optBack = from; optPage = 0; levelsOpen = false; scr = Scr.OPTIONS }
     private fun closeOptions() { Store.saveProfile(); scr = optBack }
     private fun setRenderer(k: Int) { Settings.renderer = k; Store.saveProfile(); gpu.post { gpu.visibility = if (k == R_CANVAS) View.GONE else View.VISIBLE } }
     private fun openPause() { leftId = -1; rightId = -1; jx = 0f; jy = 0f; scr = Scr.PAUSE }
@@ -135,7 +136,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         when (scr) {
             Scr.GAME -> openPause()
             Scr.PAUSE -> scr = Scr.GAME
-            Scr.OPTIONS -> closeOptions()
+            Scr.OPTIONS -> if (optPage == 1) optPage = 0 else closeOptions()
             Scr.SAVES, Scr.MULTI -> scr = Scr.MAIN
             Scr.DIFFICULTY -> scr = pickBack
             Scr.MAIN -> if (levelsOpen) levelsOpen = false else return false
@@ -393,6 +394,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
     }
 
     private fun drawOptions(c: Canvas) {
+        if (optPage == 1) return drawGraphics(c)
         val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         dim(c, 220, 200)
         heading(c, "OPTIONS", a, h * 0.15f)
@@ -401,13 +403,6 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
             Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f).toFloat(), "$nm ($f)", Settings.fov == f) })
         nextFog = drawSlider(c, "FOG", Settings.fogName(), tl, tr, h * 0.56f, h * 0.64f, Settings.fog / 100f,
             Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100f, nm, Settings.fog == f) })
-        small(c, "RENDERER", tl, h * 0.755f, 10.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT, 0.25f, true)
-        val rw = (tr - tl - 2 * 6 * dp) / 3f; val ry = h * 0.775f; var rx = tl
-        for (i in RENDERER_NAMES.indices) {
-            btn(c, RectF(rx, ry, rx + rw, ry + 22 * dp), RENDERER_NAMES[i].uppercase(), Settings.renderer == i, a) { setRenderer(i) }
-            rx += rw + 6 * dp
-        }
-        small(c, gpu.statusLine(Settings.renderer), tl, ry + 34 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
         if (playing) { // the difficulty belongs to the game being played (chosen when it was started)
         // difficulty
         val dl = w * 0.64f; val dr = w * 0.92f; val bh = 22 * dp; val gp = 4 * dp; var y = h * 0.34f
@@ -420,7 +415,31 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         }
         small(c, if (playing && g.hardcoreRun) "Hardcore run: difficulty is locked." else DIFFS[Settings.diff].blurb, dl, y + 8 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
         }
-        btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
+        btn(c, RectF(w / 2 - 150 * dp, h - 52 * dp, w / 2 - 10 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
+        btn(c, RectF(w / 2 + 10 * dp, h - 52 * dp, w / 2 + 150 * dp, h - 12 * dp), "GRAPHICS", false, a) { optPage = 1 }
+    }
+
+    /** Renderer (Canvas / OpenGL ES / Vulkan) and the size of the frame the game draws. */
+    private fun drawGraphics(c: Canvas) {
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
+        dim(c, 220, 200)
+        heading(c, "GRAPHICS", a, h * 0.15f)
+        val tl = w * 0.10f; val tr = w * 0.55f; val label = Color.rgb(220, 212, 185); val note = Color.rgb(200, 195, 160)
+        small(c, "RENDERER", tl, h * 0.30f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val rw = (tr - tl - 2 * 6 * dp) / 3f; val ry = h * 0.33f; var rx = tl
+        for (i in RENDERER_NAMES.indices) {
+            btn(c, RectF(rx, ry, rx + rw, ry + 26 * dp), RENDERER_NAMES[i].uppercase(), Settings.renderer == i, a) { setRenderer(i) }
+            rx += rw + 6 * dp
+        }
+        small(c, gpu.statusLine(Settings.renderer), tl, ry + 42 * dp, 9.5f, note, Paint.Align.LEFT)
+        small(c, "FRAME SIZE  ·  ${Settings.frameH}p (${Settings.frameW}×${Settings.frameH})", tl, h * 0.58f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val n = Settings.FRAME_HEIGHTS.size; val fw = (tr - tl - (n - 1) * 6 * dp) / n; val fy = h * 0.61f; var fx = tl
+        for (f in Settings.FRAME_HEIGHTS) {
+            btn(c, RectF(fx, fy, fx + fw, fy + 26 * dp), "${f}p", Settings.frameH == f, a) { Settings.putFrame(f); Store.saveProfile() }
+            fx += fw + 6 * dp
+        }
+        small(c, "Lower is faster: the cost grows with the pixel count. The screen scales the frame up.", tl, fy + 42 * dp, 9.5f, note, Paint.Align.LEFT)
+        btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { optPage = 0 }
     }
 
     private fun drawPause(c: Canvas) {
@@ -547,6 +566,11 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
     override fun run() {
         var last = System.nanoTime(); var t = 0.0; var lastSend = 0L
         while (running) {
+            if (r.H != Settings.frameH) { // GRAPHICS changed the frame size
+                val oldR = r; val oldBmp = bmp
+                r = Renderer(Settings.frameW, Settings.frameH); px = IntArray(r.W * r.H); bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
+                oldR.close(); oldBmp.recycle()
+            }
             val now = System.nanoTime(); val dt = (now - last) / 1e9; last = now; t += dt
             if (dt > 0) fps = fps * 0.9 + (1 / dt) * 0.1
             levelsAnim += ((if (levelsOpen && scr == Scr.MAIN) 1f else 0f) - levelsAnim) * min(1f, dt.toFloat() * 14f)
@@ -555,6 +579,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
                 r.render(px, menuG, t, emptyList(), false)
             } else {
                 val n = net
+                n?.takeSeed()?.let { g.adoptSeed(it) } // multiplayer: the server decides the world
                 if (scr == Scr.GAME) { // pausing freezes the game; the last frame stays on screen
                     playT += dt
                     if (g.exhausted) runOn = false

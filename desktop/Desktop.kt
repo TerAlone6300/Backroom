@@ -52,6 +52,13 @@ private fun relaunchOnZink(args: Array<String>): Boolean {
     return try { exitProcess(pb.start().waitFor()) } catch (e: java.io.IOException) { System.err.println("--zink: could not start the game again (${e.message}); starting normally."); false }
 }
 
+/** The frame the game draws into. Replaced when Options changes the frame size. */
+private class FrameBuf(w: Int, h: Int) {
+    val r = Renderer(w, h)
+    val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+    val px = (img.raster.dataBuffer as DataBufferInt).data
+}
+
 fun main(argv: Array<String>) {
     val args = argv.filter { it != "--zink" }.toTypedArray()
     if ("--zink" in argv && System.getenv("BACKROOMS_ZINK") == null && args.firstOrNull() != "server") relaunchOnZink(args)
@@ -62,9 +69,7 @@ fun main(argv: Array<String>) {
     loadDesktopVersion()
     Store.init(File(System.getProperty("user.home"), ".backrooms"))
 
-    val r = Renderer()
-    val img = BufferedImage(r.W, r.H, BufferedImage.TYPE_INT_RGB)
-    val px = (img.raster.dataBuffer as DataBufferInt).data
+    val cur = java.util.concurrent.atomic.AtomicReference(FrameBuf(Settings.frameW, Settings.frameH))
     val keys = ConcurrentHashMap.newKeySet<Int>()
     val g = Game(); val menuG = Game()
     var net: Net? = null; var fps = 60.0; var playT = 0.0
@@ -125,7 +130,7 @@ fun main(argv: Array<String>) {
             g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-            g2.drawImage(img, 0, 0, width, height, null)
+            g2.drawImage(cur.get().img, 0, 0, width, height, null)
             hits.clear(); fovR = null; fogR = null
             when (scr) {
                 Scr.GAME -> drawHud(g2)
@@ -321,6 +326,9 @@ fun main(argv: Array<String>) {
                 Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f), "$nm ($f)", Settings.fov == f) })
             fogR = slider(g2, "FOG", Settings.fogName(), tl, tr, (hh * 0.56).toInt(), (hh * 0.64).toInt(), Settings.fog / 100.0,
                 Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100.0, nm, Settings.fog == f) })
+            txt(g2, "FRAME SIZE  ·  ${Settings.frameH}p (${Settings.frameW}×${Settings.frameH})", tl, (hh * 0.74).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            run { val fw = (tr - tl - 4 * 6) / 5; var fx = tl
+                for (f in Settings.FRAME_HEIGHTS) { btn(g2, Rectangle(fx, (hh * 0.755).toInt(), fw, hh / 16), "${f}p", Settings.frameH == f, ac) { Settings.putFrame(f); Store.saveProfile() }; fx += fw + 6 } }
             if (playing) { // the difficulty belongs to the game being played (chosen when it was started)
             // difficulty
             val dl = (w * 0.64).toInt(); val dw = (w * 0.28).toInt(); val bh = hh / 16; val gp = hh / 100; var y = (hh * 0.34).toInt()
@@ -463,14 +471,16 @@ fun main(argv: Array<String>) {
 
     var last = System.nanoTime(); var t = 0.0; var lastSend = 0L
     while (true) {
+        if (cur.get().r.H != Settings.frameH) { val old = cur.get(); cur.set(FrameBuf(Settings.frameW, Settings.frameH)); old.r.close() } // Options changed the frame size
         val now = System.nanoTime(); val dt = (now - last) / 1e9; last = now; t += dt
         if (dt > 0) fps = fps * 0.9 + (1 / dt) * 0.1
         levelsAnim += ((if (levelsOpen && scr == Scr.MAIN) 1.0 else 0.0) - levelsAnim) * min(1.0, dt * 14)
         if (!playing) {
             menuG.a += dt * 0.12; menuG.bob += dt * 2.0; menuG.bobAmp = 0.5
-            r.render(px, menuG, t, emptyList(), false)
+            cur.get().let { it.r.render(it.px, menuG, t, emptyList(), false) }
         } else {
             val n = net
+            n?.takeSeed()?.let { g.adoptSeed(it) } // multiplayer: the server decides the world
             if (scr == Scr.GAME) { // pausing freezes the game; the last frame stays on screen
                 playT += dt
                 var f = 0.0; var s = 0.0; var turn = 0.0
@@ -490,7 +500,7 @@ fun main(argv: Array<String>) {
                 g.update(dt, f, s, turn, KeyEvent.VK_SHIFT in keys)
                 if (n != null && now / 1_000_000 - lastSend > 50) { n.send(g.x, g.y, g.level); lastSend = now / 1_000_000 }
             }
-            r.render(px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME)
+            cur.get().let { it.r.render(it.px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME) }
         }
         panel.repaint()
         Thread.sleep(8)

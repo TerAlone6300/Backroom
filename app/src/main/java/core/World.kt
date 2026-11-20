@@ -2,7 +2,18 @@ package com.backrooms.game
 // World.kt - maze generators, wall lookup (cached), noclip walls, collision and line of sight. Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import kotlin.math.*
 
-// ---------- Worlds: deterministic per level (the mazes themselves are in core/levels), so every device sees the same maze ----------
+// ---------- Worlds: a pure function of (seed, level, x, y); the mazes themselves are in core/levels. Every game has its own random seed, and devices that share a seed see the same maze ----------
+private val worldListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+/** For caches built from the world that are not tagged with the seed themselves: called whenever the world changes. */
+fun onNewWorld(f: () -> Unit) { worldListeners.add(f) }
+
+/** Starts playing in the world with this seed (a new game, a loaded save, or the multiplayer server's world). */
+fun useWorld(seed: Int) {
+    if (seed == worldSeed) return
+    worldSeed = seed
+    worldListeners.forEach { it() }
+}
+
 /** Generic room grid: blocks of b cells, walls with probability p, doors dw cells wide. */
 fun grid(x: Int, y: Int, b: Int, s: Int, p: Double, dw: Int): Boolean {
     val bx = Math.floorDiv(x, b); val by = Math.floorDiv(y, b)
@@ -57,29 +68,43 @@ private fun rawWall(lv: Int, x: Int, y: Int): Boolean {
 
 // The maze is a pure function of (level, x, y) but costs several hashes per cell, so it is cached in 32x32 chunks.
 // Chunks are immutable once published, so any thread may read them (renderer workers, game thread, UI thread).
-private class Chunk(val lv: Int, val cx: Int, val cy: Int, val w: BooleanArray)
+// Each chunk remembers the seed it was built with: the menu keeps drawing a world on another thread while a new game starts, and a chunk of the old world must never be read as the new one.
+private class Chunk(val lv: Int, val cx: Int, val cy: Int, val seed: Int, val w: BooleanArray)
 private val chunks = java.util.concurrent.atomic.AtomicReferenceArray<Chunk?>(1024)
 @Volatile private var chunkMiss = 0
 
 private fun chunk(lv: Int, cx: Int, cy: Int): Chunk {
+    val seed = worldSeed
     val i = ((cx * 73856093) xor (cy * 19349663) xor (lv * 83492791)) and 1023
     var free = -1
     for (k in 0..3) { // 4-way probing so two busy chunks never evict each other
         val j = (i + k) and 1023; val c = chunks.get(j)
-        if (c == null) { if (free < 0) free = j } else if (c.cx == cx && c.cy == cy && c.lv == lv) return c
+        if (c == null || c.seed != seed) { if (free < 0) free = j } else if (c.cx == cx && c.cy == cy && c.lv == lv) return c
     }
     val a = BooleanArray(1024); val x0 = cx shl 5; val y0 = cy shl 5
     for (j in 0 until 32) for (k in 0 until 32) a[j * 32 + k] = rawWall(lv, x0 + k, y0 + j)
-    val n = Chunk(lv, cx, cy, a)
+    if (worldSeed != seed) return chunk(lv, cx, cy) // the world changed while this was being built: start again
+    val n = Chunk(lv, cx, cy, seed, a)
     chunks.set(if (free >= 0) free else (i + (chunkMiss++ and 3)) and 1023, n)
     return n
 }
 
 fun isWall(lv: Int, x: Int, y: Int): Boolean = chunk(lv, x shr 5, y shr 5).w[((y and 31) shl 5) or (x and 31)]
 
-/** Each level has 4 not-quite-solid walls at fixed spots (none if LevelSpec.noclip is empty); each leads to a fixed level (LevelSpec.noclip). */
-val NOCLIPS: Map<Int, List<IntArray>> by lazy {
-    LEVELS.map { it.id }.associateWith { lv ->
+private class NoclipSet(val seed: Int, val map: Map<Int, List<IntArray>>)
+@Volatile private var noclipSet: NoclipSet? = null
+/** Each level has 4 not-quite-solid walls (none if LevelSpec.noclip is empty); each leads to a fixed level (LevelSpec.noclip). Where they are depends on the world, so they are found again for every new one. */
+val NOCLIPS: Map<Int, List<IntArray>> get() {
+    while (true) {
+        val seed = worldSeed
+        noclipSet?.let { if (it.seed == seed) return it.map }
+        val m = computeNoclips()
+        if (worldSeed == seed) { noclipSet = NoclipSet(seed, m); return m }
+    }
+}
+
+private fun computeNoclips(): Map<Int, List<IntArray>> {
+    return LEVELS.map { it.id }.associateWith { lv ->
         // Level 0: scattered around the Manila Room. Other levels: around the spawn area.
         val ax = if (lv == 0) Manila.CX + 4 else 4; val ay = if (lv == 0) Manila.CY + 4 else 4
         val out = ArrayList<IntArray>()

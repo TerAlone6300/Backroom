@@ -7,7 +7,7 @@ Khám phá những không gian vô tận mang cảm giác siêu thực, tìm đ�
 ## Tính năng
 
 - **Khám phá góc nhìn thứ nhất** – Khám phá những môi trường đậm chất không gian siêu thực với trải nghiệm nhập vai góc nhìn thứ nhất.
-- **Môi trường được tạo theo thuật toán** – Cơ chế tạo mê cung có tính xác định, đảm bảo thế giới nhất quán giữa các thiết bị.
+- **Môi trường được tạo theo thuật toán** – Mỗi ván chơi mới tạo ra một thế giới hoàn toàn ngẫu nhiên từ một seed riêng. Seed được lưu cùng bản lưu; trong multiplayer, máy chủ gửi seed của mình cho mọi người chơi nên ai cũng ở trong cùng một thế giới. Bản lưu và máy chủ phiên bản cũ vẫn mở đúng thế giới ban đầu.
 - **Nhiều tầng khác nhau** – Mỗi tầng có môi trường, bố cục và tiến trình riêng.
 - **Tường Noclip** – Khám phá những bức tường không ổn định, cho phép di chuyển đến các tầng khác.
 - **Nhiều người chơi (Multiplayer)** – Kết nối với máy chủ Multiplayer thông qua địa chỉ IP và cổng kết nối.
@@ -126,9 +126,9 @@ Trò chơi tích hợp nhiều phương pháp tối ưu hóa kết xuất hình 
 
 ## Bộ kết xuất
 
-Khung hình được vẽ trên CPU với độ phân giải 1920×1080 (`FRAME_W` × `FRAME_H` trong `core/Util.kt`), rồi hiển thị lên màn hình bằng một trong các cách sau.
+Khung hình được vẽ trên CPU, mặc định ở 1080p (1920×1080). Có thể đổi trong Options: 270p, 360p, 540p, 720p hoặc 1080p (luôn là 16:9). Trên Android ở mục GRAPHICS → FRAME SIZE, trên desktop ở Options → FRAME SIZE. Độ phân giải thấp nhanh hơn nhiều vì chi phí tăng theo số pixel, và màn hình tự phóng to khung hình. Sau đó khung hình được hiển thị lên màn hình bằng một trong các cách sau.
 
-**Android** (Options → RENDERER, mặc định là Canvas):
+**Android** (Options → GRAPHICS → RENDERER, mặc định là Canvas):
 
 - **Canvas**: cách cũ, hoạt động trên mọi máy.
 - **OpenGL ES**: GPU phóng khung hình lên màn hình (`gpu/GlesPresenter.kt`).

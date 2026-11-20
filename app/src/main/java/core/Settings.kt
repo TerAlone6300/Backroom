@@ -14,6 +14,11 @@ object Settings {
     @Volatile var fov = 60
     @Volatile var fog = 100  // % of each level's own fog density (0 = no fog)
     @Volatile var renderer = R_CANVAS // how the Android client puts the frame on screen (desktop ignores it)
+    /** Height of the frame the game draws (always 16:9, so 1080 = 1920x1080). The screen scales it. Lower is much faster: the cost grows with the pixel count. */
+    val FRAME_HEIGHTS = intArrayOf(270, 360, 540, 720, 1080)
+    @Volatile var frameH = FRAME_H
+    val frameW get() = frameH * 16 / 9
+    fun putFrame(h: Int) { frameH = FRAME_HEIGHTS.minByOrNull { abs(it - h) } ?: FRAME_H }
     @Volatile var diff = 1   // index into DIFFS: the difficulty of the game being played. Chosen when a game starts and kept in its save, never in the profile
     val FOG_PRESETS = listOf(0 to "Off", 50 to "Light", 100 to "Default")
     val fogScale get() = fog / 100.0

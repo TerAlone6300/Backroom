@@ -20,6 +20,7 @@ class GpuFrameView(ctx: Context) : SurfaceView(ctx), SurfaceHolder.Callback {
     private var presenter: FramePresenter? = null
     private var presenterKind = R_CANVAS
     private var presenterSurf: Surface? = null
+    private var presenterW = 0; private var presenterH = 0   // frame size the presenter was built for
     private var lastKind = -1
     private val failed = arrayOfNulls<String>(3)   // why a backend was given up on this session (null = not failed)
     @Volatile private var active: String? = null   // name of the running backend, for the Options screen
@@ -36,7 +37,7 @@ class GpuFrameView(ctx: Context) : SurfaceView(ctx), SurfaceHolder.Callback {
             if (kind != lastKind) { lastKind = kind; failed[kind] = null }  // picking a backend again retries it
             val s = surf
             if (kind == R_CANVAS || s == null || !s.isValid || viewW <= 0 || viewH <= 0) { drop(); return false }
-            if (presenter != null && (presenterKind != kind || presenterSurf !== s)) drop()
+            if (presenter != null && (presenterKind != kind || presenterSurf !== s || presenterW != w || presenterH != h)) drop()
             if (failed[kind] != null) return false
 
             var p = presenter
@@ -47,7 +48,7 @@ class GpuFrameView(ctx: Context) : SurfaceView(ctx), SurfaceHolder.Callback {
                         Log.w(TAG, "${RENDERER_NAMES[kind]} unavailable: ${failed[kind]}")
                         return false
                     }
-                presenter = p; presenterKind = kind; presenterSurf = s; active = p.name
+                presenter = p; presenterKind = kind; presenterSurf = s; presenterW = w; presenterH = h; active = p.name
                 Log.i(TAG, "Using ${p.name}")
             }
             if (!p.present(px, viewW, viewH)) {

@@ -69,6 +69,7 @@ object Island : OpenWorld {
     }
     private class CC(val cx: Int, val cy: Int, val v: ByteArray)
     private val cache = java.util.concurrent.atomic.AtomicReferenceArray<CC?>(256)
+    init { onNewWorld { for (i in 0 until 256) cache.set(i, null) } }
     /** Class bits of the cell (0 outside the volcano slopes and in the crater). */
     fun cell(x: Int, y: Int): Int {
         val cx = x shr 5; val cy = y shr 5; val slot = ((cx * 73856093) xor (cy * 19349663)) and 255

@@ -69,6 +69,7 @@ object City : OpenWorld {
     /** Per-block facts, cached: footprint of the hollow building [x0, y0, x1, y1] (or null), whether it is stocked, whether it is dark. */
     private class BlockInfo(val bx: Int, val by: Int, val foot: IntArray?, val stocked: Boolean, val dark: Boolean)
     private val blocks = java.util.concurrent.atomic.AtomicReferenceArray<BlockInfo?>(512)
+    init { onNewWorld { for (i in 0 until 512) blocks.set(i, null) } }
     private fun info(bx: Int, by: Int): BlockInfo {
         val i = ((bx * 73856093) xor (by * 19349663)) and 511
         val c = blocks.get(i); if (c != null && c.bx == bx && c.by == by) return c

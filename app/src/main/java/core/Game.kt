@@ -171,12 +171,21 @@ class Game {
         return true
     }
 
-    fun newGame(lv: Int = 0) { hardcoreRun = Settings.hardcore; playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
+    fun newGame(lv: Int = 0) { useWorld(randomWorldSeed()); hardcoreRun = Settings.hardcore; playSec = 0.0; hunger = 1.0; rations = DIFFS[Settings.diff].kitRations; water = DIFFS[Settings.diff].kitWater; starveT = 0.0; enter(lv) }
 
-    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT, Settings.diff)
+    fun snapshot(id: String) = SaveData(id, System.currentTimeMillis(), level, x, y, a, pitch, stamina, playSec, hunger, rations, water, lobbyT, Settings.diff, worldSeed)
+
+    /** Multiplayer: the server's world replaces the one this client started with. The player stays put (on the nearest free cell) and the entities are placed again. */
+    fun adoptSeed(seed: Int) {
+        if (seed == worldSeed) return
+        useWorld(seed); scanX = Int.MIN_VALUE
+        val p = findFree(x, y); x = p.first; y = p.second
+        spawnEntities()
+    }
 
     /** Resume a save: same level and spot; entities start fresh, 11+ cells away. */
     fun restore(s: SaveData) {
+        useWorld(s.seed) // the world the save was played in
         level = if (levelExists(s.level)) s.level else 0; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0
         arrival = "YOU CAME BACK"; stamina = s.stamina.coerceIn(0.0, 1.0); exhausted = false
         a = s.a; pitch = s.pitch.coerceIn(-1.0, 1.0); playSec = s.playSec
