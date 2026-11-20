@@ -9,6 +9,17 @@ class VulkanPresenter private constructor(private var handle: Long, override val
         return h != 0L && VkNative.present(h, px, viewW, viewH)
     }
 
+    private var texSerial = -1   // a new presenter has empty textures: the first scene frame uploads them
+
+    override fun presentScene(scene: SceneData, viewW: Int, viewH: Int): Boolean {
+        val h = handle
+        if (h == 0L) return false
+        val upload = scene.texSerial != texSerial
+        val ok = VkNative.presentScene(h, scene.f, if (upload) scene.tex else null, viewW, viewH)
+        if (ok && upload) texSerial = scene.texSerial
+        return ok
+    }
+
     override fun release() {
         val h = handle; handle = 0L
         if (h != 0L) VkNative.release(h)

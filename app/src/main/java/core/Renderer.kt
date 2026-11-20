@@ -20,6 +20,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     /** Pixel-sized effects (HUD, head bob, glitch, sway) were drawn for a 270-line frame: this scales them to H. */
     private val ps = H / 270.0
     private fun u(n: Int) = (n * ps).roundToInt()
+    private fun horizon(g: Game) = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 * ps + g.pitch * H * 0.5).toInt()
     private val pool = if (nt > 1) java.util.concurrent.Executors.newFixedThreadPool(nt - 1) { r -> Thread(r).also { it.isDaemon = true } } else null
 
     /** Per-thread lamp memo: a lamp's brightness (flicker) is worked out once per frame instead of once per pixel. */
@@ -280,12 +281,29 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         }
     }
 
+    /** Sprites to draw this frame, far to near: other players on this level, the level's entities, supplies, hallucinations. */
+    private fun collectSprites(g: Game, t: Double, others: Collection<DoubleArray>, ow: OpenWorld?): ArrayList<DoubleArray> {
+        val lv = g.level; val d = levelDef(lv); val x = g.x; val y = g.y
+        val items = ArrayList<DoubleArray>()
+        for (o in others) if (o.size > 2 && o[2].toInt() == lv) {
+            // isolated levels hide other players, even right next to you (except inside the Manila Room)
+            if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
+            items.add(doubleArrayOf(o[0], o[1], 0.0))
+        }
+        ow?.extraSprites(x, y, items)
+        for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
+        for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) S_RATION.toDouble() else S_WATER.toDouble()))
+        for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
+        items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
+        return items
+    }
+
     fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
         val lv = g.level; val d = levelDef(lv); val ts = texOf(lv); val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
         spec = levelSpec(lv); zonesOn = spec.zones; for (b in bands) b.zx = Int.MIN_VALUE
         frame++; lpx = x; lpy = y; lant = d.lantern; pres = g.presence
-        val hz = (H / 2 + sin(g.bob) * g.bobAmp * 3.0 * ps + g.pitch * H * 0.5).toInt()
+        val hz = horizon(g)
         val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.985) 0.75 else 1.0 // very rare, mild global flicker
         val dx = cos(a); val dy = sin(a)
         val pl = tan(Math.toRadians(Settings.fov / 2.0)); val vs = 0.66 / pl // camera plane length from FOV; vs keeps heights in proportion
@@ -367,17 +385,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         }
 
         // sprites: other players on this level + this level's entities, far to near
-        val items = ArrayList<DoubleArray>()
-        for (o in others) if (o.size > 2 && o[2].toInt() == lv) {
-            // isolated levels hide other players, even right next to you (except inside the Manila Room)
-            if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
-            items.add(doubleArrayOf(o[0], o[1], 0.0))
-        }
-        ow?.extraSprites(x, y, items)
-        for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
-        for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) S_RATION.toDouble() else S_WATER.toDouble()))
-        for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
-        items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
+        val items = collectSprites(g, t, others, ow)
         for (o in items) {
             val rx = o[0] - x; val ry = o[1] - y; val type = o[2].toInt()
             val inv = 1.0 / (plX * dy - dx * plY)
@@ -448,6 +456,157 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         }
 
         if (hud) drawHud(px, g, others)
+    }
+
+    /**
+     * GPU path. Works out what a shader cannot do cheaply (the wall DDA, lamp flicker, the sprite list, the numbers of the
+     * post effects, the HUD shapes) and writes it to `out`; app/src/main/cpp/shaders/scene.glsl draws the pixels.
+     * It mirrors render() on purpose (render() stays the reference: tools/scene-test compares the two).
+     * false = this level is an open world (city, island, graveyard): its ground and buildings are code, not data, so
+     * those still need render() and an uploaded frame.
+     */
+    fun buildScene(g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean, out: SceneData): Boolean {
+        val lv = g.level; val sp = levelSpec(lv)
+        if (sp.world != null) return false
+        val d = sp.def; val tn = d.tint
+        val x = g.x; val y = g.y; val a = g.a
+        spec = sp; zonesOn = sp.zones; for (b in bands) b.zx = Int.MIN_VALUE
+        frame++; lpx = x; lpy = y; lant = d.lantern; pres = g.presence
+        val hz = horizon(g)
+        val gl = if (sin(t * 2.7) * sin(t * 13.1) > 0.985) 0.75 else 1.0
+        val dx = cos(a); val dy = sin(a)
+        val pl = tan(Math.toRadians(Settings.fov / 2.0)); val vs = 0.66 / pl
+        val plX = -dy * pl; val plY = dx * pl
+        val fk = d.fogK * Settings.fogScale
+        out.useTextures(lv)
+
+        // lamp brightness (flicker, stutter near entities, blackout zone) for the lamps around the player
+        val kx0 = floor((x - d.lamp0) * d.ip + 0.5).toInt() - Scene.LR
+        val ky0 = floor((y - d.lamp0) * d.ip + 0.5).toInt() - Scene.LR
+        val l0 = bands[0]
+        for (j in 0 until Scene.LW) for (i in 0 until Scene.LW)
+            out.put(Scene.LMP + j * Scene.LW + i, l0.at(lv, kx0 + i, ky0 + j, t), if (zonesOn) l0.zone(sp, d, kx0 + i, ky0 + j) else 1.0, 0.0, 0.0)
+
+        // wall hit of every column (same DDA as render())
+        par(W) { b, c0, c1 ->
+            val lp = bands[b]
+            for (xx in c0 until c1) {
+                val cx = camX[xx]
+                val rx = dx + plX * cx; val ry = dy + plY * cx
+                var mapX = floor(x).toInt(); var mapY = floor(y).toInt()
+                val ddx = abs(1 / rx); val ddy = abs(1 / ry)
+                val stepX = if (rx < 0) -1 else 1; val stepY = if (ry < 0) -1 else 1
+                var sdx = if (rx < 0) (x - mapX) * ddx else (mapX + 1 - x) * ddx
+                var sdy = if (ry < 0) (y - mapY) * ddy else (mapY + 1 - y) * ddy
+                var side = 0; var n = 0
+                while (n++ < 64) {
+                    if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
+                    if (isWall(lv, mapX, mapY)) break
+                }
+                val unst = unstable(lv, mapX, mapY)
+                val man = lv == 0 && Manila.inBox(mapX, mapY)
+                val perp = (if (side == 0) sdx - ddx else sdy - ddy).coerceAtLeast(0.05)
+                val hx = x + perp * rx; val hy = y + perp * ry
+                var tx = (((if (side == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
+                if ((side == 0 && rx > 0) || (side == 1 && ry < 0)) tx = 63 - tx
+                val br = (if (man) 1.05 else lightAt(d, lp, hx, hy, t) * gl) / (1 + perp * perp * fk) * (if (side == 1) 0.82 else 1.0)
+                val lineH = (H * vs / perp).toInt().coerceAtLeast(1)
+                val k = (br * 256).toInt().coerceIn(0, 640)
+                val o = Scene.COL + xx * 3
+                out.put(o, perp, lineH.toDouble(), (hz - lineH / 2).toDouble(), tx.toDouble())
+                out.put(o + 1, (k * tn[0]).toDouble(), (k * tn[1]).toDouble(), (k * tn[2]).toDouble(), br)
+                out.put(o + 2, if (unst) 1.0 else 0.0, if (man) 1.0 else 0.0, 0.0, 0.0)
+            }
+        }
+
+        // sprites, far to near (the shader draws them in this order)
+        val boxes = ArrayList<DoubleArray>()
+        val inv = 1.0 / (plX * dy - dx * plY)
+        for (o in collectSprites(g, t, others, null)) {
+            val rx = o[0] - x; val ry = o[1] - y; val type = o[2].toInt()
+            val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
+            if (ty <= 0.2) continue
+            val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
+            val sh = (full * hk).toInt().coerceAtLeast(2)
+            val sw = (sh * wk).toInt().coerceAtLeast(2)
+            val bottom = hz + (full * g.camH).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly
+            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 20) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it }
+            boxes.add(doubleArrayOf(sx.toDouble(), sw.toDouble(), top.toDouble(), sh.toDouble(), type.toDouble(), dim, if (o.size > 3 && o[3] == 2.0) 1.0 else 0.0, ty))
+        }
+        val ns = min(boxes.size, Scene.MAX_SPR); val first = boxes.size - ns // too many: the farthest ones are dropped
+        for (i in 0 until ns) {
+            val bx = boxes[first + i]
+            out.put(Scene.SPR + i * 2, bx[0], bx[1], bx[2], bx[3]); out.put(Scene.SPR + i * 2 + 1, bx[4], bx[5], bx[6], bx[7])
+        }
+
+        // post effects (numbers as in render())
+        val dgr = max(g.danger * g.danger * (0.5 + 0.5 * sin(t * (5 + 9 * g.danger))), g.halluc * 0.3 * (0.5 + 0.5 * sin(t * 1.9)))
+        val rk = (dgr * 180).toInt()
+        val fadeI = ((if (g.dead) (1 - g.deadT / 1.2).coerceIn(0.0, 1.0) else 1.0) * 256).toInt()
+        val wash = ((g.noclip * g.noclip * 150) + g.flash * 255).toInt()
+        val amp = 1 + (g.near * 2).toInt()
+        val seed = grain
+        grain = seed * 1664525 + 1013904223
+        var ng = 0
+        val gk = max(g.noclip, g.near * 0.3)
+        if (gk > 0.02) {
+            var q = grain
+            repeat((gk * 50).toInt() + 1) {
+                q = q * 1664525 + 1013904223; val row = ((q ushr 8) and 0xFFFF) % H
+                q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * gk * 0.35 * ps).toInt()
+                if (sh != 0 && ng < Scene.MAX_GLI) out.put(Scene.GLI + ng++, row.toDouble(), sh.toDouble(), 0.0, 0.0)
+            }
+        }
+
+        // HUD shapes: a list of rectangles blended in order, plus the minimap's wall bits
+        var nh = 0
+        fun hr(x0: Int, y0: Int, w: Int, h: Int, r: Int, gr: Int, b: Int, al: Int) {
+            if (nh >= Scene.MAX_HUD) return
+            out.put(Scene.HUD + nh * 2, x0.toDouble(), y0.toDouble(), (x0 + w).toDouble(), (y0 + h).toDouble())
+            out.put(Scene.HUD + nh * 2 + 1, r.toDouble(), gr.toDouble(), b.toDouble(), al.toDouble()); nh++
+        }
+        if (hud && g.showMap && !d.isolated) {
+            val R = 8; val cs = u(3); val size = (2 * R + 1) * cs
+            val ox = W - size - u(8); val oy = u(8)
+            val fx = floor(g.x).toInt(); val fy = floor(g.y).toInt()
+            hr(ox - u(2), oy - u(2), size + u(4), size + u(4), 0, 0, 0, 150)
+            for (cy in -R..R) {
+                var bits = 0
+                for (cx in -R..R) if (isWall(lv, fx + cx, fy + cy)) bits = bits or (1 shl (cx + R))
+                out.put(Scene.MAP + cy + R, bits.toDouble(), 0.0, 0.0, 0.0)
+            }
+            if (nh < Scene.MAX_HUD) { // the wall layer: B.x = -1 marks it; A = (origin x, origin y, cell size, 0), B.yzw = accent colour, alpha is 210
+                out.put(Scene.HUD + nh * 2, ox.toDouble(), oy.toDouble(), cs.toDouble(), 0.0)
+                out.put(Scene.HUD + nh * 2 + 1, -1.0, ((d.accent shr 16) and 255).toDouble(), ((d.accent shr 8) and 255).toDouble(), (d.accent and 255).toDouble()); nh++
+            }
+            for (o in others) if (o.size > 2 && o[2].toInt() == lv && abs(o[0] - g.x) < R && abs(o[1] - g.y) < R)
+                hr(ox + ((o[0] - fx + R) * cs).toInt() - u(1), oy + ((o[1] - fy + R) * cs).toInt() - u(1), u(3), u(3), 230, 60, 40, 256)
+            val pxx = ox + ((g.x - fx + R) * cs).toInt(); val pyy = oy + ((g.y - fy + R) * cs).toInt()
+            for (k in 2..6) hr(pxx + (cos(g.a) * k * ps).toInt(), pyy + (sin(g.a) * k * ps).toInt(), u(1), u(1), 255, 255, 255, 200)
+            hr(pxx - u(1), pyy - u(1), u(3), u(3), 255, 255, 255, 256)
+        }
+        if (hud && g.stamina < 0.999) {
+            val bw = u(90); val bx = (W - bw) / 2; val by = H - u(16)
+            hr(bx - u(2), by - u(2), bw + u(4), u(8), 0, 0, 0, 150)
+            if (g.exhausted) hr(bx, by, (bw * g.stamina).toInt(), u(4), 210, 60, 40, 240) else hr(bx, by, (bw * g.stamina).toInt(), u(4), 240, 225, 140, 240)
+        }
+
+        // header
+        out.put(0, x, y, dx, dy)
+        out.put(1, plX, plY, hz.toDouble(), vs)
+        out.put(2, fk, gl, t, ps)
+        out.put(3, d.period.toDouble(), d.lamp0, d.ip, d.ambient)
+        out.put(4, d.falloff, d.lantern, x, y)
+        out.put(5, tn[0].toDouble(), tn[1].toDouble(), tn[2].toDouble(), if (zonesOn) 1.0 else 0.0)
+        out.put(6, W.toDouble(), H.toDouble(), kx0.toDouble(), ky0.toDouble())
+        out.put(7, if (lv == LV_SUBLIMITY) 1.0 else 0.0, if (lv == 0) 1.0 else 0.0, Manila.CX.toDouble(), Manila.CY.toDouble())
+        out.put(8, rk.toDouble(), fadeI.toDouble(), wash.toDouble(), amp.toDouble())
+        out.put(9, ((seed ushr 8) and 0xFFFF).toDouble(), (worldSeed and 0xFFFF).toDouble(), (worldSeed ushr 16).toDouble(), 0.0)
+        out.put(10, if (g.halluc > 0.04) g.halluc else 0.0, ng.toDouble(), ns.toDouble(), nh.toDouble())
+        out.put(Scene.CELL, floor(x), floor(y), x - floor(x), y - floor(y))
+        return true
     }
 
     // ---------- shape-only HUD (text is drawn by each platform) ----------

@@ -53,6 +53,18 @@ JNIEXPORT jboolean JNICALL Java_com_backrooms_game_VkNative_present(JNIEnv* env,
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL Java_com_backrooms_game_VkNative_presentScene(JNIEnv* env, jclass, jlong handle, jfloatArray data, jintArray tex, jint viewW, jint viewH) {
+    auto* hd = reinterpret_cast<Handle*>(handle);
+    if (!hd || !data) return JNI_FALSE;
+    const jsize nData = static_cast<jsize>(VkFramePresenter::kDataBytes / sizeof(jfloat));
+    const jsize nTex = static_cast<jsize>(VkFramePresenter::kTexBytes / sizeof(jint));
+    if (env->GetArrayLength(data) < nData || (tex && env->GetArrayLength(tex) < nTex)) return JNI_FALSE;
+    VkFramePresenter::FrameInput in;
+    in.fillData = [&](void* dst) { env->GetFloatArrayRegion(data, 0, nData, static_cast<jfloat*>(dst)); };
+    if (tex) in.fillTex = [&](void* dst) { env->GetIntArrayRegion(tex, 0, nTex, static_cast<jint*>(dst)); };
+    return hd->presenter.present(in, static_cast<uint32_t>(viewW), static_cast<uint32_t>(viewH)) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL Java_com_backrooms_game_VkNative_deviceName(JNIEnv* env, jclass, jlong handle) {
     auto* hd = reinterpret_cast<Handle*>(handle);
     return env->NewStringUTF(hd ? hd->presenter.deviceName().c_str() : "");

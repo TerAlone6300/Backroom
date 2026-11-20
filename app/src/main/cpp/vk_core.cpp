@@ -195,44 +195,69 @@ bool VkFramePresenter::findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags w
     return false;
 }
 
-bool VkFramePresenter::createFrameResources() {
-    const VkDeviceSize bytes = VkDeviceSize(fw_) * fh_ * 4;
-
-    // The frame texture. B8G8R8A8 matches the in-memory order of the game's 0xAARRGGBB ints (little endian), so the
-    // pixels are copied as they are. UNORM, not SRGB: the pixels are already display-encoded.
+bool VkFramePresenter::makeImage(Image& im, VkFormat fmt, uint32_t w, uint32_t h, uint32_t layers, const char* what) {
     VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ii.imageType = VK_IMAGE_TYPE_2D;
-    ii.format = VK_FORMAT_B8G8R8A8_UNORM;
-    ii.extent = {fw_, fh_, 1};
+    ii.format = fmt;
+    ii.extent = {w, h, 1};
     ii.mipLevels = 1;
-    ii.arrayLayers = 1;
+    ii.arrayLayers = layers;
     ii.samples = VK_SAMPLE_COUNT_1_BIT;
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
     ii.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VK_TRY(fn_.CreateImage(device_, &ii, nullptr, &tex_), "create frame texture");
+    VK_TRY(fn_.CreateImage(device_, &ii, nullptr, &im.img), what);
     VkMemoryRequirements req;
-    fn_.GetImageMemoryRequirements(device_, tex_, &req);
+    fn_.GetImageMemoryRequirements(device_, im.img, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
     if (!findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &ai.memoryTypeIndex) &&
         !findMemoryType(req.memoryTypeBits, 0, &ai.memoryTypeIndex))
-        return fail("no memory type for the frame texture");
-    VK_TRY(fn_.AllocateMemory(device_, &ai, nullptr, &texMem_), "allocate frame texture");
-    VK_TRY(fn_.BindImageMemory(device_, tex_, texMem_, 0), "bind frame texture");
-
+        return fail(what);
+    VK_TRY(fn_.AllocateMemory(device_, &ai, nullptr, &im.mem), what);
+    VK_TRY(fn_.BindImageMemory(device_, im.img, im.mem, 0), what);
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    vi.image = tex_;
-    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vi.format = ii.format;
-    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    VK_TRY(fn_.CreateImageView(device_, &vi, nullptr, &texView_), "create frame texture view");
+    vi.image = im.img;
+    vi.viewType = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = fmt;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers};
+    VK_TRY(fn_.CreateImageView(device_, &vi, nullptr, &im.view), what);
+    return true;
+}
+
+bool VkFramePresenter::makeStaging(Staging& s, VkDeviceSize bytes, const char* what) {
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = bytes;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VK_TRY(fn_.CreateBuffer(device_, &bi, nullptr, &s.buf), what);
+    VkMemoryRequirements req;
+    fn_.GetBufferMemoryRequirements(device_, s.buf, &req);
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ai.allocationSize = req.size;
+    if (!findMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &ai.memoryTypeIndex))
+        return fail("no host-visible coherent memory for a staging buffer");
+    VK_TRY(fn_.AllocateMemory(device_, &ai, nullptr, &s.mem), what);
+    VK_TRY(fn_.BindBufferMemory(device_, s.buf, s.mem, 0), what);
+    VK_TRY(fn_.MapMemory(device_, s.mem, 0, VK_WHOLE_SIZE, 0, &s.mapped), what);
+    return true;
+}
+
+bool VkFramePresenter::createFrameResources() {
+    // B8G8R8A8 matches the in-memory order of the game's 0xAARRGGBB ints (little endian): pixels are copied as they are.
+    // UNORM, not SRGB: the colours are already display-encoded.
+    if (!makeImage(frameTex_, VK_FORMAT_B8G8R8A8_UNORM, fw_, fh_, 1, "create frame texture") ||
+        !makeImage(dataTex_, VK_FORMAT_R32G32B32A32_SFLOAT, kDataW, kDataH, 1, "create scene data texture") ||
+        !makeImage(arrTex_, VK_FORMAT_B8G8R8A8_UNORM, kTexSize, kTexSize, kTexLayers, "create level texture array"))
+        return false;
 
     VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    si.magFilter = si.minFilter = VK_FILTER_LINEAR;  // same smoothing as the Canvas and GLES paths
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    VK_TRY(fn_.CreateSampler(device_, &si, nullptr, &sampler_), "create sampler");
+    si.magFilter = si.minFilter = VK_FILTER_NEAREST;  // the scene shader reads texels exactly (texelFetch); float textures cannot be filtered everywhere
+    VK_TRY(fn_.CreateSampler(device_, &si, nullptr, &nearest_), "create sampler");
+    si.magFilter = si.minFilter = VK_FILTER_LINEAR;   // a CPU frame is scaled smoothly, like the Canvas and GLES paths
+    VK_TRY(fn_.CreateSampler(device_, &si, nullptr, &linear_), "create sampler");
 
     VkCommandPoolCreateInfo pi{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -245,44 +270,33 @@ bool VkFramePresenter::createFrameResources() {
         cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         cai.commandBufferCount = 1;
         VK_TRY(fn_.AllocateCommandBuffers(device_, &cai, &f.cmd), "allocate command buffer");
-
         VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fi.flags = VK_FENCE_CREATE_SIGNALED_BIT;  // the first wait must not block
         VK_TRY(fn_.CreateFence(device_, &fi, nullptr, &f.fence), "create fence");
         VkSemaphoreCreateInfo semi{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VK_TRY(fn_.CreateSemaphore(device_, &semi, nullptr, &f.acquired), "create semaphore");
-
-        // One staging buffer per frame in flight, so the CPU can fill the next one while the GPU still reads this one.
-        VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        bi.size = bytes;
-        bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        VK_TRY(fn_.CreateBuffer(device_, &bi, nullptr, &f.staging), "create staging buffer");
-        VkMemoryRequirements breq;
-        fn_.GetBufferMemoryRequirements(device_, f.staging, &breq);
-        VkMemoryAllocateInfo bai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        bai.allocationSize = breq.size;
-        if (!findMemoryType(breq.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &bai.memoryTypeIndex))
-            return fail("no host-visible coherent memory for the staging buffer");
-        VK_TRY(fn_.AllocateMemory(device_, &bai, nullptr, &f.stagingMem), "allocate staging buffer");
-        VK_TRY(fn_.BindBufferMemory(device_, f.staging, f.stagingMem, 0), "bind staging buffer");
-        VK_TRY(fn_.MapMemory(device_, f.stagingMem, 0, VK_WHOLE_SIZE, 0, &f.mapped), "map staging buffer");
+        if (!makeStaging(f.frame, VkDeviceSize(fw_) * fh_ * 4, "frame staging buffer") ||
+            !makeStaging(f.data, kDataBytes, "scene data staging buffer") ||
+            !makeStaging(f.tex, kTexBytes, "texture staging buffer"))
+            return false;
     }
     return true;
 }
 
 bool VkFramePresenter::createDescriptors() {
-    VkDescriptorSetLayoutBinding b{};
-    b.binding = 0;
-    b.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    b.descriptorCount = 1;
-    b.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding b[3]{};
+    for (uint32_t i = 0; i < 3; i++) {
+        b[i].binding = i;
+        b[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        b[i].descriptorCount = 1;
+        b[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.bindingCount = 1;
-    li.pBindings = &b;
+    li.bindingCount = 3;
+    li.pBindings = b;
     VK_TRY(fn_.CreateDescriptorSetLayout(device_, &li, nullptr, &setLayout_), "create descriptor set layout");
 
-    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3};
     VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.maxSets = 1;
     pi.poolSizeCount = 1;
@@ -295,14 +309,20 @@ bool VkFramePresenter::createDescriptors() {
     ai.pSetLayouts = &setLayout_;
     VK_TRY(fn_.AllocateDescriptorSets(device_, &ai, &descSet_), "allocate descriptor set");
 
-    VkDescriptorImageInfo img{sampler_, texView_, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    w.dstSet = descSet_;
-    w.dstBinding = 0;
-    w.descriptorCount = 1;
-    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    w.pImageInfo = &img;
-    fn_.UpdateDescriptorSets(device_, 1, &w, 0, nullptr);
+    VkDescriptorImageInfo img[3] = {
+        {nearest_, dataTex_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},   // binding 0: scene data
+        {nearest_, arrTex_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},    // binding 1: level textures
+        {linear_, frameTex_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};  // binding 2: CPU frame
+    VkWriteDescriptorSet w[3]{};
+    for (uint32_t i = 0; i < 3; i++) {
+        w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w[i].dstSet = descSet_;
+        w[i].dstBinding = i;
+        w[i].descriptorCount = 1;
+        w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[i].pImageInfo = &img[i];
+    }
+    fn_.UpdateDescriptorSets(device_, 3, w, 0, nullptr);
     return true;
 }
 
@@ -520,34 +540,61 @@ bool VkFramePresenter::recreateSwapchain(uint32_t viewW, uint32_t viewH) {
 // per frame
 // ---------------------------------------------------------------------------------------------------------------
 
-bool VkFramePresenter::record(const Frame& f, uint32_t imageIndex) {
+bool VkFramePresenter::record(const Frame& f, uint32_t imageIndex, bool upFrame, bool upTex) {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_TRY(fn_.BeginCommandBuffer(f.cmd, &bi), "begin command buffer");
 
-    const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    // Texture: discard the old contents (the whole image is overwritten) and wait for last frame's sampling to finish.
-    VkImageMemoryBarrier toDst{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    toDst.srcAccessMask = 0;
-    toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toDst.srcQueueFamilyIndex = toDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    toDst.image = tex_;
-    toDst.subresourceRange = range;
-    fn_.CmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toDst);
+    const VkImageSubresourceRange one{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    const VkImageSubresourceRange all{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, kTexLayers};
+    auto barrier = [&](Image& im, const VkImageSubresourceRange& range, VkImageLayout from, VkImageLayout to, VkAccessFlags src, VkAccessFlags dst) {
+        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        b.srcAccessMask = src;
+        b.dstAccessMask = dst;
+        b.oldLayout = from;
+        b.newLayout = to;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = im.img;
+        b.subresourceRange = range;
+        return b;
+    };
+    const VkImageLayout UNDEF = VK_IMAGE_LAYOUT_UNDEFINED, DST = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, READ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    const VkAccessFlags W = VK_ACCESS_TRANSFER_WRITE_BIT, R = VK_ACCESS_SHADER_READ_BIT;
+
+    // Every image uploaded now is overwritten whole: drop its old contents, and wait for the last frame's sampling to finish.
+    VkImageMemoryBarrier pre[3]; uint32_t np = 0;
+    pre[np++] = barrier(dataTex_, one, UNDEF, DST, 0, W);
+    if (upFrame) pre[np++] = barrier(frameTex_, one, UNDEF, DST, 0, W);
+    if (upTex) pre[np++] = barrier(arrTex_, all, UNDEF, DST, 0, W);
+    fn_.CmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, np, pre);
 
     VkBufferImageCopy copy{};
     copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    copy.imageExtent = {fw_, fh_, 1};
-    fn_.CmdCopyBufferToImage(f.cmd, f.staging, tex_, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    copy.imageExtent = {kDataW, kDataH, 1};
+    fn_.CmdCopyBufferToImage(f.cmd, f.data.buf, dataTex_.img, DST, 1, &copy);
+    if (upFrame) {
+        copy.imageExtent = {fw_, fh_, 1};
+        fn_.CmdCopyBufferToImage(f.cmd, f.frame.buf, frameTex_.img, DST, 1, &copy);
+    }
+    if (upTex) {
+        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, kTexLayers};
+        copy.imageExtent = {kTexSize, kTexSize, 1};
+        fn_.CmdCopyBufferToImage(f.cmd, f.tex.buf, arrTex_.img, DST, 1, &copy);
+    }
 
-    VkImageMemoryBarrier toRead = toDst;
-    toRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    toRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    toRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    fn_.CmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toRead);
+    VkImageMemoryBarrier post[3]; uint32_t nq = 0;
+    post[nq++] = barrier(dataTex_, one, DST, READ, W, R);
+    if (upFrame) post[nq++] = barrier(frameTex_, one, DST, READ, W, R);
+    if (upTex) post[nq++] = barrier(arrTex_, all, DST, READ, W, R);
+    fn_.CmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, nq, post);
+    // An image that was never uploaded still has to be in the layout the descriptor says (its contents are not used).
+    VkImageMemoryBarrier init[2]; uint32_t ni = 0;
+    if (!upFrame && !frameTex_.inited) init[ni++] = barrier(frameTex_, one, UNDEF, READ, 0, R);
+    if (!upTex && !arrTex_.inited) init[ni++] = barrier(arrTex_, all, UNDEF, READ, 0, R);
+    if (ni) fn_.CmdPipelineBarrier(f.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, ni, init);
+    frameTex_.inited = frameTex_.inited || upFrame || ni > 0;
+    arrTex_.inited = arrTex_.inited || upTex || ni > 0;
+    dataTex_.inited = true;
 
     VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rb.renderPass = renderPass_;
@@ -567,7 +614,14 @@ bool VkFramePresenter::record(const Frame& f, uint32_t imageIndex) {
 }
 
 bool VkFramePresenter::present(const FrameFill& fill, uint32_t viewW, uint32_t viewH) {
-    if (!ready_) return false;
+    FrameInput in;
+    in.fillData = [](void* dst) { std::memset(dst, 0, kDataBytes); };  // no scene: the shader only needs the mode texel
+    in.fillFrame = [&](void* dst) { fill(dst, size_t(fw_) * fh_ * 4); };
+    return present(in, viewW, viewH);
+}
+
+bool VkFramePresenter::present(const FrameInput& in, uint32_t viewW, uint32_t viewH) {
+    if (!ready_ || !in.fillData) return false;
     if (swapchain_ == VK_NULL_HANDLE || needRecreate_ || (extentFromView_ && (viewW != extent_.width || viewH != extent_.height))) {
         if (!recreateSwapchain(viewW, viewH)) return false;
         needRecreate_ = false;
@@ -586,8 +640,13 @@ bool VkFramePresenter::present(const FrameFill& fill, uint32_t viewW, uint32_t v
     // VK_SUBOPTIMAL_KHR is fine: with an identity preTransform on a rotated display it is reported on every frame.
 
     VK_TRY(fn_.ResetFences(device_, 1, &f.fence), "reset fence");
-    fill(f.mapped, size_t(fw_) * fh_ * 4);
-    if (!record(f, idx)) return false;
+    const bool upFrame = static_cast<bool>(in.fillFrame), upTex = static_cast<bool>(in.fillTex);
+    in.fillData(f.data.mapped);
+    float* view = static_cast<float*>(f.data.mapped) + kViewTexel * 4;  // the shader maps its pixels onto the frame with the real target size
+    view[0] = static_cast<float>(extent_.width); view[1] = static_cast<float>(extent_.height); view[2] = upFrame ? 1.0f : 0.0f; view[3] = 0.0f;
+    if (upFrame) in.fillFrame(f.frame.mapped);
+    if (upTex) in.fillTex(f.tex.mapped);
+    if (!record(f, idx, upFrame, upTex)) return false;
 
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -622,10 +681,13 @@ void VkFramePresenter::destroy() {
     ready_ = false;
     if (device_ != VK_NULL_HANDLE) {
         fn_.DeviceWaitIdle(device_);
+        auto freeStaging = [&](Staging& s) {
+            if (s.mapped) fn_.UnmapMemory(device_, s.mem);
+            if (s.buf) fn_.DestroyBuffer(device_, s.buf, nullptr);
+            if (s.mem) fn_.FreeMemory(device_, s.mem, nullptr);
+        };
         for (Frame& f : frames_) {
-            if (f.mapped) fn_.UnmapMemory(device_, f.stagingMem);
-            if (f.staging) fn_.DestroyBuffer(device_, f.staging, nullptr);
-            if (f.stagingMem) fn_.FreeMemory(device_, f.stagingMem, nullptr);
+            freeStaging(f.frame); freeStaging(f.data); freeStaging(f.tex);
             if (f.acquired) fn_.DestroySemaphore(device_, f.acquired, nullptr);
             if (f.fence) fn_.DestroyFence(device_, f.fence, nullptr);
             f = Frame{};
@@ -639,10 +701,14 @@ void VkFramePresenter::destroy() {
         if (renderPass_) fn_.DestroyRenderPass(device_, renderPass_, nullptr);
         if (descPool_) fn_.DestroyDescriptorPool(device_, descPool_, nullptr);  // frees the descriptor set
         if (setLayout_) fn_.DestroyDescriptorSetLayout(device_, setLayout_, nullptr);
-        if (sampler_) fn_.DestroySampler(device_, sampler_, nullptr);
-        if (texView_) fn_.DestroyImageView(device_, texView_, nullptr);
-        if (tex_) fn_.DestroyImage(device_, tex_, nullptr);
-        if (texMem_) fn_.FreeMemory(device_, texMem_, nullptr);
+        if (nearest_) fn_.DestroySampler(device_, nearest_, nullptr);
+        if (linear_) fn_.DestroySampler(device_, linear_, nullptr);
+        for (Image* im : {&frameTex_, &dataTex_, &arrTex_}) {
+            if (im->view) fn_.DestroyImageView(device_, im->view, nullptr);
+            if (im->img) fn_.DestroyImage(device_, im->img, nullptr);
+            if (im->mem) fn_.FreeMemory(device_, im->mem, nullptr);
+            *im = Image{};
+        }
         fn_.DestroyDevice(device_, nullptr);
     }
     if (instance_ != VK_NULL_HANDLE) {
@@ -650,8 +716,8 @@ void VkFramePresenter::destroy() {
         fn_.DestroyInstance(instance_, nullptr);
     }
     pool_ = VK_NULL_HANDLE; pipeline_ = VK_NULL_HANDLE; pipeLayout_ = VK_NULL_HANDLE; vert_ = frag_ = VK_NULL_HANDLE;
-    renderPass_ = VK_NULL_HANDLE; descPool_ = VK_NULL_HANDLE; setLayout_ = VK_NULL_HANDLE; sampler_ = VK_NULL_HANDLE;
-    texView_ = VK_NULL_HANDLE; tex_ = VK_NULL_HANDLE; texMem_ = VK_NULL_HANDLE; descSet_ = VK_NULL_HANDLE;
+    renderPass_ = VK_NULL_HANDLE; descPool_ = VK_NULL_HANDLE; setLayout_ = VK_NULL_HANDLE; nearest_ = linear_ = VK_NULL_HANDLE;
+    descSet_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE; surface_ = VK_NULL_HANDLE; instance_ = VK_NULL_HANDLE; swapchain_ = VK_NULL_HANDLE;
     // libvulkan stays loaded on purpose: unloading a Vulkan driver after use is a known source of crashes.
 }

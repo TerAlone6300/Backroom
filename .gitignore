@@ -4,3 +4,5 @@ build/
 local.properties
 
 tools/vk-host-test/vk-host-test
+tools/scene-test/vk-scene-test
+tools/scene-test/gles-scene-test

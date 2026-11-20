@@ -44,6 +44,19 @@ public:
     /** Copies exactly frameW*frameH*4 bytes of pixels to dst. */
     using FrameFill = std::function<void(void* dst, size_t bytes)>;
 
+    // Scene data texture (RGBA32F, see core/Scene.kt), the level's texture array, and the CPU-drawn frame.
+    static constexpr uint32_t kDataW = 2048, kDataH = 8, kTexLayers = 8, kTexSize = 64;
+    static constexpr size_t kDataBytes = size_t(kDataW) * kDataH * 16;
+    static constexpr size_t kTexBytes = size_t(kTexLayers) * kTexSize * kTexSize * 4;
+    static constexpr int kViewTexel = 12;  // vec4 (view width, view height, mode): written here, not by the caller
+
+    /** One frame. fillData is required. Give fillFrame for a frame the CPU drew (mode 1), fillTex when the textures changed. */
+    struct FrameInput {
+        std::function<void(void* dst)> fillData;   // kDataBytes
+        std::function<void(void* dst)> fillFrame;  // frameW*frameH*4 bytes, 0xAARRGGBB; makes this frame mode 1
+        std::function<void(void* dst)> fillTex;    // kTexBytes: texture layers, 0xAARRGGBB
+    };
+
     VkFramePresenter() = default;
     ~VkFramePresenter() { destroy(); }
     VkFramePresenter(const VkFramePresenter&) = delete;
@@ -55,6 +68,8 @@ public:
      * Draws one frame. false = unrecoverable (device or surface lost): stop using this presenter.
      * true also covers "skipped this frame" (window minimised, no image available within 100 ms).
      */
+    bool present(const FrameInput& in, uint32_t viewW, uint32_t viewH);
+    /** A frame the CPU drew (the scene data is empty and the shader just shows the frame). */
     bool present(const FrameFill& fill, uint32_t viewW, uint32_t viewH);
     void destroy();
 
@@ -65,13 +80,13 @@ public:
 
 private:
     static constexpr int kFrames = 2;  // frames in flight
+    struct Staging { VkBuffer buf = VK_NULL_HANDLE; VkDeviceMemory mem = VK_NULL_HANDLE; void* mapped = nullptr; };
+    struct Image { VkImage img = VK_NULL_HANDLE; VkDeviceMemory mem = VK_NULL_HANDLE; VkImageView view = VK_NULL_HANDLE; bool inited = false; };
     struct Frame {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
         VkSemaphore acquired = VK_NULL_HANDLE;
-        VkBuffer staging = VK_NULL_HANDLE;
-        VkDeviceMemory stagingMem = VK_NULL_HANDLE;
-        void* mapped = nullptr;
+        Staging frame, data, tex;  // one set per frame in flight: the CPU fills the next while the GPU reads this one
     };
 
     struct Fns {
@@ -96,7 +111,9 @@ private:
     bool createRenderPassAndPipeline();
     bool createDescriptors();
     bool findMemoryType(uint32_t typeBits, VkMemoryPropertyFlags want, uint32_t* out) const;
-    bool record(const Frame& f, uint32_t imageIndex);
+    bool makeImage(Image& im, VkFormat fmt, uint32_t w, uint32_t h, uint32_t layers, const char* what);
+    bool makeStaging(Staging& s, VkDeviceSize bytes, const char* what);
+    bool record(const Frame& f, uint32_t imageIndex, bool upFrame, bool upTex);
 
     std::string error_, deviceName_;
     SurfaceFactory factory_;
@@ -130,10 +147,8 @@ private:
     VkDescriptorPool descPool_ = VK_NULL_HANDLE;
     VkDescriptorSet descSet_ = VK_NULL_HANDLE;
 
-    VkImage tex_ = VK_NULL_HANDLE;
-    VkDeviceMemory texMem_ = VK_NULL_HANDLE;
-    VkImageView texView_ = VK_NULL_HANDLE;
-    VkSampler sampler_ = VK_NULL_HANDLE;
+    Image frameTex_, dataTex_, arrTex_;   // binding 2, 0, 1 of the shader
+    VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE;
 
     VkCommandPool pool_ = VK_NULL_HANDLE;
     std::array<Frame, kFrames> frames_{};

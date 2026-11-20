@@ -46,6 +46,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
     private var r = Renderer(Settings.frameW, Settings.frameH)  // replaced (on the render thread) when the frame size changes
     private var px = IntArray(r.W * r.H)
     private var bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
+    private val scene = SceneData()   // what the GPU renderer draws from, rebuilt every frame
     private val bmpPaint = Paint().apply { isFilterBitmap = true }
     private val g = Game(); private val menuG = Game()
     private var net: Net? = null
@@ -432,6 +433,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
             rx += rw + 6 * dp
         }
         small(c, gpu.statusLine(Settings.renderer), tl, ry + 42 * dp, 9.5f, note, Paint.Align.LEFT)
+        if (Settings.renderer != R_CANVAS) small(c, "The GPU draws the 3D view. City, Island and Graveyard are still drawn by the CPU.", tl, ry + 56 * dp, 9.5f, note, Paint.Align.LEFT)
         small(c, "FRAME SIZE  ·  ${Settings.frameH}p (${Settings.frameW}×${Settings.frameH})", tl, h * 0.58f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
         val n = Settings.FRAME_HEIGHTS.size; val fw = (tr - tl - (n - 1) * 6 * dp) / n; val fy = h * 0.61f; var fx = tl
         for (f in Settings.FRAME_HEIGHTS) {
@@ -563,6 +565,22 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
     }
     private fun unlock(c: Canvas) { if (hw) holder.surface.unlockCanvasAndPost(c) else holder.unlockCanvasAndPost(c) }
 
+    /**
+     * Draws the 3D view. With OpenGL ES or Vulkan the GPU draws it from the scene data and the CPU does not render at all;
+     * open-world levels (city, island, graveyard) are still drawn by the CPU and the frame is uploaded. Canvas, or a GPU
+     * backend that does not work, draws on the CPU into the bitmap. true = the picture is on the GPU surface under this one.
+     */
+    private fun drawFrame(g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean): Boolean {
+        val kind = Settings.renderer
+        if (gpu.usable(kind)) {
+            if (r.buildScene(g, t, others, hud, scene)) { if (gpu.presentScene(scene, r.W, r.H, kind)) return true }
+            else { r.render(px, g, t, others, hud); if (gpu.present(px, r.W, r.H, kind)) return true }
+        }
+        r.render(px, g, t, others, hud)
+        bmp.setPixels(px, 0, r.W, 0, 0, r.W, r.H)
+        return false
+    }
+
     override fun run() {
         var last = System.nanoTime(); var t = 0.0; var lastSend = 0L
         while (running) {
@@ -574,9 +592,10 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
             val now = System.nanoTime(); val dt = (now - last) / 1e9; last = now; t += dt
             if (dt > 0) fps = fps * 0.9 + (1 / dt) * 0.1
             levelsAnim += ((if (levelsOpen && scr == Scr.MAIN) 1f else 0f) - levelsAnim) * min(1f, dt.toFloat() * 14f)
+            val fg: Game; val fo: Collection<DoubleArray>; val fh: Boolean   // what to draw this frame
             if (!playing) {
                 menuG.a += dt * 0.12; menuG.bob += dt * 2.0; menuG.bobAmp = 0.5
-                r.render(px, menuG, t, emptyList(), false)
+                fg = menuG; fo = emptyList(); fh = false
             } else {
                 val n = net
                 n?.takeSeed()?.let { g.adoptSeed(it) } // multiplayer: the server decides the world
@@ -586,10 +605,9 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
                     g.update(dt, -jy.toDouble(), jx.toDouble(), 0.0, runOn)
                     if (n != null && now / 1_000_000 - lastSend > 50) { n.send(g.x, g.y, g.level); lastSend = now / 1_000_000 }
                 }
-                r.render(px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME)
+                fg = g; fo = n?.others?.values ?: emptyList(); fh = scr == Scr.GAME
             }
-            val onGpu = gpu.present(px, r.W, r.H, Settings.renderer) // true: the frame is on the GPU surface under this one
-            if (!onGpu) bmp.setPixels(px, 0, r.W, 0, 0, r.W, r.H)
+            val onGpu = drawFrame(fg, t, fo, fh) // true: the 3D view is on the GPU surface under this one
             val c = lock() ?: continue
             try {
                 if (onGpu) c.drawColor(0, PorterDuff.Mode.CLEAR) else c.drawBitmap(bmp, null, Rect(0, 0, c.width, c.height), bmpPaint)

@@ -28,10 +28,18 @@ class GpuFrameView(ctx: Context) : SurfaceView(ctx), SurfaceHolder.Callback {
     init { holder.addCallback(this) }
 
     /**
-     * Render thread, once per frame. true = the frame is now on this surface; false = the caller must draw it with Canvas
+     * Render thread, once per frame (present / presentScene). true = the frame is now on this surface; false = the caller must draw it with Canvas
      * (Canvas selected, surface not ready, or the backend failed: the reason is kept for statusLine()).
      */
-    fun present(px: IntArray, w: Int, h: Int, kind: Int): Boolean {
+    fun present(px: IntArray, w: Int, h: Int, kind: Int): Boolean = use(w, h, kind) { it.present(px, viewW, viewH) }
+
+    /** Like present(), but the GPU draws the picture from the scene data. */
+    fun presentScene(scene: SceneData, w: Int, h: Int, kind: Int): Boolean = use(w, h, kind) { it.presentScene(scene, viewW, viewH) }
+
+    /** false once a backend has been given up on this session: the caller should not bother building a scene for it. */
+    fun usable(kind: Int) = kind != R_CANVAS && failed[kind] == null
+
+    private inline fun use(w: Int, h: Int, kind: Int, draw: (FramePresenter) -> Boolean): Boolean {
         lock.lock()
         try {
             if (kind != lastKind) { lastKind = kind; failed[kind] = null }  // picking a backend again retries it
@@ -42,7 +50,7 @@ class GpuFrameView(ctx: Context) : SurfaceView(ctx), SurfaceHolder.Callback {
 
             var p = presenter
             if (p == null) {
-                p = try { if (kind == R_VULKAN) VulkanPresenter.create(s, w, h) else GlesPresenter(s, w, h) }
+                p = try { if (kind == R_VULKAN) VulkanPresenter.create(s, w, h) else GlesPresenter(s, w, h, context.assets) }
                     catch (t: Throwable) {   // includes UnsatisfiedLinkError when the native library is missing
                         failed[kind] = t.message ?: t.javaClass.simpleName
                         Log.w(TAG, "${RENDERER_NAMES[kind]} unavailable: ${failed[kind]}")
@@ -51,7 +59,7 @@ class GpuFrameView(ctx: Context) : SurfaceView(ctx), SurfaceHolder.Callback {
                 presenter = p; presenterKind = kind; presenterSurf = s; presenterW = w; presenterH = h; active = p.name
                 Log.i(TAG, "Using ${p.name}")
             }
-            if (!p.present(px, viewW, viewH)) {
+            if (!draw(p)) {
                 failed[kind] = "${p.name} stopped working"
                 Log.w(TAG, failed[kind]!!)
                 drop()

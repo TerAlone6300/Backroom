@@ -1,30 +1,36 @@
 package com.backrooms.game
-// GlesPresenter.kt - OpenGL ES 2.0 backend (EGL14). Android only.
-// Create, present() and release() must all run on the same thread (an EGL context is bound to its thread).
+// GlesPresenter.kt - OpenGL ES 3.0 backend. Android only.
+// One shader (assets/shaders/scene.glsl, shared with Vulkan) draws either the 3D view from the scene data (presentScene) or a
+// frame the CPU drew (present). The GL calls are the ones tools/scene-test/gles-scene-test.cpp makes, which checks them
+// against the CPU renderer. Create, present and release must all run on the same thread (an EGL context is bound to it).
 
+import android.content.res.AssetManager
 import android.opengl.EGL14
 import android.opengl.EGLConfig
 import android.opengl.EGLContext
 import android.opengl.EGLDisplay
+import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES20
+import android.opengl.GLES30
 import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
-import java.nio.IntBuffer
 
-class GlesPresenter(private val surface: Surface, private val w: Int, private val h: Int) : FramePresenter {
+class GlesPresenter(private val surface: Surface, private val w: Int, private val h: Int, private val assets: AssetManager) : FramePresenter {
     override var name = "OpenGL ES"; private set
     private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var context: EGLContext = EGL14.EGL_NO_CONTEXT
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var program = 0
-    private var texture = 0
-    private val upload: ByteBuffer = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
-    private val ints: IntBuffer = upload.asIntBuffer()
-    private val posBuf: FloatBuffer = floats(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
-    private val uvBuf: FloatBuffer = floats(floatArrayOf(0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f))
+    private val tex = IntArray(3)   // 0 scene data, 1 level textures, 2 the CPU's frame
+    private var texSerial = -1      // the level textures in the GPU are those of this SceneData.texSerial
+    private val dataBuf = direct(Scene.DATA_W * Scene.DATA_H * 16)
+    private val texBuf = direct(Scene.TEX_LAYERS * Scene.TEX_SIZE * Scene.TEX_SIZE * 4)
+    private val frameBuf = direct(w * h * 4)
+    private val viewBuf = direct(16)
+    private val dataF = dataBuf.asFloatBuffer(); private val texI = texBuf.asIntBuffer()   // views: no new objects per frame
+    private val frameI = frameBuf.asIntBuffer(); private val viewF = viewBuf.asFloatBuffer()
 
     init {
         try { setup() } catch (e: Throwable) { release(); throw e }
@@ -38,52 +44,71 @@ class GlesPresenter(private val surface: Surface, private val w: Int, private va
 
         val attribs = intArrayOf(
             EGL14.EGL_RED_SIZE, 8, EGL14.EGL_GREEN_SIZE, 8, EGL14.EGL_BLUE_SIZE, 8, EGL14.EGL_ALPHA_SIZE, 8,
-            EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT, EGL14.EGL_NONE
+            EGL14.EGL_RENDERABLE_TYPE, EGLExt.EGL_OPENGL_ES3_BIT_KHR, EGL14.EGL_NONE
         )
         val configs = arrayOfNulls<EGLConfig>(1)
         val num = IntArray(1)
         EGL14.eglChooseConfig(display, attribs, 0, configs, 0, 1, num, 0)
-        val config = configs[0] ?: error("No EGLConfig for OpenGL ES 2.0")
+        val config = configs[0] ?: error("No EGLConfig for OpenGL ES 3.0")
 
-        context = EGL14.eglCreateContext(
-            display, config, EGL14.EGL_NO_CONTEXT, intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE), 0
-        )
-        check(context != EGL14.EGL_NO_CONTEXT) { "eglCreateContext failed" }
+        context = EGL14.eglCreateContext(display, config, EGL14.EGL_NO_CONTEXT, intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 3, EGL14.EGL_NONE), 0)
+        check(context != EGL14.EGL_NO_CONTEXT) { "OpenGL ES 3.0 is not available" }
         eglSurface = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
         check(eglSurface != EGL14.EGL_NO_SURFACE) { "eglCreateWindowSurface failed" }
         check(EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) { "eglMakeCurrent failed" }
 
-        program = link(VERT, FRAG)
-        texture = IntArray(1).also { GLES20.glGenTextures(1, it, 0) }[0]
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        val scene = assets.open("shaders/scene.glsl").bufferedReader().use { it.readText() }
+        program = link(VERT, FRAG_PREFIX + scene)
+        GLES20.glUseProgram(program)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uData"), 0)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uTex"), 1)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uFrame"), 2)
+
+        GLES20.glGenTextures(3, tex, 0)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES30.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA32F, Scene.DATA_W, Scene.DATA_H, 0, GLES20.GL_RGBA, GLES20.GL_FLOAT, null)
+        params(GLES20.GL_TEXTURE_2D, GLES20.GL_NEAREST, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1); GLES20.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, tex[1])
+        GLES30.glTexImage3D(GLES30.GL_TEXTURE_2D_ARRAY, 0, GLES30.GL_RGBA8, Scene.TEX_SIZE, Scene.TEX_SIZE, Scene.TEX_LAYERS, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        params(GLES30.GL_TEXTURE_2D_ARRAY, GLES20.GL_NEAREST, GLES20.GL_REPEAT)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[2])
+        GLES30.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        params(GLES20.GL_TEXTURE_2D, GLES20.GL_LINEAR, GLES20.GL_CLAMP_TO_EDGE)   // a CPU frame is scaled smoothly
+        GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 4)
         name = "OpenGL ES (${GLES20.glGetString(GLES20.GL_RENDERER) ?: "?"})"
+    }
+
+    override fun presentScene(scene: SceneData, viewW: Int, viewH: Int): Boolean {
+        if (display == EGL14.EGL_NO_DISPLAY) return false
+        scene.put(Scene.VIEW, viewW.toDouble(), viewH.toDouble(), 0.0, 0.0)   // view size, mode 0 = scene
+        dataF.clear(); dataF.put(scene.f)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, Scene.DATA_W, Scene.DATA_H, GLES20.GL_RGBA, GLES20.GL_FLOAT, dataBuf)
+        if (scene.texSerial != texSerial) {
+            texI.clear(); texI.put(scene.tex)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1); GLES20.glBindTexture(GLES30.GL_TEXTURE_2D_ARRAY, tex[1])
+            GLES30.glTexSubImage3D(GLES30.GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, Scene.TEX_SIZE, Scene.TEX_SIZE, Scene.TEX_LAYERS, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, texBuf)
+            texSerial = scene.texSerial
+        }
+        return draw(viewW, viewH)
     }
 
     override fun present(px: IntArray, viewW: Int, viewH: Int): Boolean {
         if (display == EGL14.EGL_NO_DISPLAY) return false
         // 0xAARRGGBB ints are B,G,R,A in memory (little endian); the shader swaps R and B back, so no per-pixel work here.
-        ints.clear(); ints.put(px, 0, w * h)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, upload)
+        frameI.clear(); frameI.put(px, 0, w * h)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE2); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[2])
+        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, frameBuf)
+        // mode 1: of the scene data, the shader only reads the texel with the view size and the mode
+        viewF.clear(); viewF.put(viewW.toFloat()); viewF.put(viewH.toFloat()); viewF.put(1f); viewF.put(0f)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, Scene.VIEW, 0, 1, 1, GLES20.GL_RGBA, GLES20.GL_FLOAT, viewBuf)
+        return draw(viewW, viewH)
+    }
 
+    private fun draw(viewW: Int, viewH: Int): Boolean {
         GLES20.glViewport(0, 0, viewW, viewH)
-        GLES20.glClearColor(0f, 0f, 0f, 1f)
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        GLES20.glUseProgram(program)
-        val aPos = GLES20.glGetAttribLocation(program, "aPos")
-        val aUv = GLES20.glGetAttribLocation(program, "aUv")
-        GLES20.glEnableVertexAttribArray(aPos)
-        GLES20.glEnableVertexAttribArray(aUv)
-        GLES20.glVertexAttribPointer(aPos, 2, GLES20.GL_FLOAT, false, 0, posBuf)
-        GLES20.glVertexAttribPointer(aUv, 2, GLES20.GL_FLOAT, false, 0, uvBuf)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisableVertexAttribArray(aPos)
-        GLES20.glDisableVertexAttribArray(aUv)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 3)   // one triangle covers the screen; the shader does the rest
         return EGL14.eglSwapBuffers(display, eglSurface)
     }
 
@@ -121,21 +146,19 @@ class GlesPresenter(private val surface: Surface, private val w: Int, private va
         return s
     }
 
-    private companion object {
-        fun floats(a: FloatArray): FloatBuffer =
-            ByteBuffer.allocateDirect(a.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(a).also { it.position(0) }
+    private fun params(target: Int, filter: Int, wrap: Int) {
+        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MIN_FILTER, filter); GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_MAG_FILTER, filter)
+        GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_WRAP_S, wrap); GLES20.glTexParameteri(target, GLES20.GL_TEXTURE_WRAP_T, wrap)
+    }
 
-        const val VERT = """
-            attribute vec2 aPos;
-            attribute vec2 aUv;
-            varying vec2 vUv;
-            void main() { gl_Position = vec4(aPos, 0.0, 1.0); vUv = aUv; }
-        """
-        const val FRAG = """
-            precision mediump float;
-            uniform sampler2D uTex;
-            varying vec2 vUv;
-            void main() { gl_FragColor = vec4(texture2D(uTex, vUv).bgr, 1.0); }
-        """
+    private companion object {
+        fun direct(bytes: Int): ByteBuffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
+
+        const val VERT = """#version 300 es
+void main() {
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}"""
+        const val FRAG_PREFIX = "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\nprecision highp sampler2DArray;\n#define GLES 1\n"
     }
 }

@@ -5,7 +5,9 @@ package com.backrooms.game
 interface FramePresenter {
     /** Human-readable backend and GPU, e.g. "Vulkan (Adreno 650)". */
     val name: String
-    /** Draws one frame. false = this backend failed and must not be used again. */
+    /** Shows a frame the CPU drew (open-world levels, whose ground and buildings are code, not data). false = this backend failed. */
     fun present(px: IntArray, viewW: Int, viewH: Int): Boolean
+    /** Draws the 3D view itself, on the GPU, from the scene data Renderer.buildScene made. false = this backend failed. */
+    fun presentScene(scene: SceneData, viewW: Int, viewH: Int): Boolean
     fun release()
 }

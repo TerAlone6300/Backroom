@@ -126,19 +126,20 @@ Trò chơi tích hợp nhiều phương pháp tối ưu hóa kết xuất hình 
 
 ## Bộ kết xuất
 
-Khung hình được vẽ trên CPU, mặc định ở 1080p (1920×1080). Có thể đổi trong Options: 270p, 360p, 540p, 720p hoặc 1080p (luôn là 16:9). Trên Android ở mục GRAPHICS → FRAME SIZE, trên desktop ở Options → FRAME SIZE. Độ phân giải thấp nhanh hơn nhiều vì chi phí tăng theo số pixel, và màn hình tự phóng to khung hình. Sau đó khung hình được hiển thị lên màn hình bằng một trong các cách sau.
+Khung hình mặc định ở 1080p (1920×1080). Có thể đổi trong Options: 270p, 360p, 540p, 720p hoặc 1080p (luôn là 16:9). Trên Android ở mục GRAPHICS → FRAME SIZE, trên desktop ở Options → FRAME SIZE. Độ phân giải thấp nhanh hơn vì chi phí tăng theo số pixel, và màn hình tự phóng to khung hình. Cách khung hình được vẽ phụ thuộc vào bộ kết xuất.
 
 **Android** (Options → GRAPHICS → RENDERER, mặc định là Canvas):
 
-- **Canvas**: cách cũ, hoạt động trên mọi máy.
-- **OpenGL ES**: GPU phóng khung hình lên màn hình (`gpu/GlesPresenter.kt`).
-- **Vulkan**: như trên nhưng qua Vulkan (`app/src/main/cpp`, nạp `libvulkan` lúc chạy nên `minSdk` vẫn là 21).
+- **Canvas**: CPU vẽ toàn bộ khung hình rồi Android hiển thị. Hoạt động trên mọi máy.
+- **OpenGL ES** (cần ES 3.0, `gpu/GlesPresenter.kt`) và **Vulkan** (`app/src/main/cpp`, nạp `libvulkan` lúc chạy nên `minSdk` vẫn là 21): GPU tự vẽ hình 3D (sàn, trần, tường, sprite, hiệu ứng, minimap) từ dữ liệu cảnh bằng một shader dùng chung cho cả hai, `app/src/main/assets/shaders/scene.glsl`. CPU chỉ còn chiếu tia theo từng cột, tính đèn nhấp nháy và danh sách sprite (`Renderer.buildScene`), tốn chưa tới 1 ms thay vì hàng chục ms ở 1080p, và chi phí này không tăng theo độ phân giải.
+
+Ba level thế giới mở (City, Island, Graveyard) có mặt đất và tòa nhà được sinh bằng mã riêng, chưa chuyển sang shader, nên ở đó CPU vẫn vẽ khung hình rồi đưa lên GPU để phóng to.
 
 Nếu backend được chọn không khởi động được, trò chơi tự quay về Canvas và Options hiển thị lý do.
 
 **Desktop** (Linux + Mesa): `java -jar backrooms.jar --zink` chạy pipeline OpenGL của Java2D trên Zink (OpenGL chạy trên Vulkan). Nếu GPU của bạn chỉ có Vulkan CPU như lavapipe, đặt thêm `LIBGL_ALWAYS_SOFTWARE=1`.
 
-**Kiểm thử backend Vulkan trên máy tính**: `tools/vk-host-test/run.sh [rộng cao]` chạy cùng mã C++ với bản Android trên X11, rồi đọc lại cửa sổ để kiểm tra màu, chiều ảnh, đổi kích thước và tạo lại bề mặt. Cần `libvulkan-dev`, `libx11-dev` và một driver Vulkan (`mesa-vulkan-drivers`). Sau khi sửa shader trong `app/src/main/cpp/shaders`, chạy `compile_shaders.sh` (cần `glslang-tools`) để cập nhật `vk_shaders.h`.
+**Kiểm thử trên máy tính**: `tools/vk-host-test/run.sh [rộng cao]` chạy cùng mã C++ với bản Android trên X11, rồi đọc lại cửa sổ để kiểm tra màu, chiều ảnh, đổi kích thước và tạo lại bề mặt. `tools/scene-test` so sánh bộ kết xuất GPU với bản CPU: `Cases.kt` dựng 29 tình huống (mọi level mê cung, các loại quái, vật phẩm, hiệu ứng, minimap), `SceneDump.kt` xuất khung CPU cùng dữ liệu cảnh, rồi `run.sh` (Vulkan) và `run-gles.sh` (OpenGL ES) vẽ lại bằng shader và so theo khối 16×16, vì nhiễu hạt cùng cường độ nhưng khác dãy số ngẫu nhiên. Cần `libvulkan-dev`, `libx11-dev` và một driver Vulkan (`mesa-vulkan-drivers`). Sau khi sửa shader trong `app/src/main/cpp/shaders`, chạy `compile_shaders.sh` (cần `glslang-tools`) để cập nhật `vk_shaders.h`.
 ## Links & Social 
  
 - Discord: https://discord.gg/DfpyAs9TaZ
