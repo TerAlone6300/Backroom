@@ -420,28 +420,50 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         btn(c, RectF(w / 2 + 10 * dp, h - 52 * dp, w / 2 + 150 * dp, h - 12 * dp), "GRAPHICS", false, a) { optPage = 1 }
     }
 
-    /** Renderer (Canvas / OpenGL ES / Vulkan) and the size of the frame the game draws. */
+    /** Renderer, frame size, FPS limit and VSync. */
     private fun drawGraphics(c: Canvas) {
         val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
         dim(c, 220, 200)
-        heading(c, "GRAPHICS", a, h * 0.15f)
-        val tl = w * 0.10f; val tr = w * 0.55f; val label = Color.rgb(220, 212, 185); val note = Color.rgb(200, 195, 160)
-        small(c, "RENDERER", tl, h * 0.30f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
-        val rw = (tr - tl - 2 * 6 * dp) / 3f; val ry = h * 0.33f; var rx = tl
+        heading(c, "GRAPHICS", a, h * 0.10f)
+        val tl = w * 0.08f; val tr = w * 0.92f; val label = Color.rgb(220, 212, 185); val note = Color.rgb(200, 195, 160)
+        // Renderer
+        small(c, "RENDERER", tl, h * 0.20f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val rw = (tr - tl - 2 * 6 * dp) / 3f; val ry = h * 0.225f; var rx = tl
         for (i in RENDERER_NAMES.indices) {
-            btn(c, RectF(rx, ry, rx + rw, ry + 26 * dp), RENDERER_NAMES[i].uppercase(), Settings.renderer == i, a) { setRenderer(i) }
+            btn(c, RectF(rx, ry, rx + rw, ry + 24 * dp), RENDERER_NAMES[i].uppercase(), Settings.renderer == i, a) { setRenderer(i) }
             rx += rw + 6 * dp
         }
-        small(c, gpu.statusLine(Settings.renderer), tl, ry + 42 * dp, 9.5f, note, Paint.Align.LEFT)
-        if (Settings.renderer != R_CANVAS) small(c, "The GPU draws the 3D view. City, Island and Graveyard are still drawn by the CPU.", tl, ry + 56 * dp, 9.5f, note, Paint.Align.LEFT)
-        small(c, "FRAME SIZE  ·  ${Settings.frameH}p (${Settings.frameW}×${Settings.frameH})", tl, h * 0.58f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
-        val n = Settings.FRAME_HEIGHTS.size; val fw = (tr - tl - (n - 1) * 6 * dp) / n; val fy = h * 0.61f; var fx = tl
+        small(c, gpu.statusLine(Settings.renderer), tl, ry + 36 * dp, 9f, note, Paint.Align.LEFT)
+        // Frame size
+        small(c, "FRAME SIZE  ·  ${Settings.frameH}p", tl, h * 0.38f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val n = Settings.FRAME_HEIGHTS.size; val fw = (tr - tl - (n - 1) * 5 * dp) / n; val fy = h * 0.405f; var fx = tl
         for (f in Settings.FRAME_HEIGHTS) {
-            btn(c, RectF(fx, fy, fx + fw, fy + 26 * dp), "${f}p", Settings.frameH == f, a) { Settings.putFrame(f); Store.saveProfile() }
-            fx += fw + 6 * dp
+            btn(c, RectF(fx, fy, fx + fw, fy + 24 * dp), "${f}p", Settings.frameH == f, a) { Settings.putFrame(f); Store.saveProfile() }
+            fx += fw + 5 * dp
         }
-        small(c, "Lower is faster: the cost grows with the pixel count. The screen scales the frame up.", tl, fy + 42 * dp, 9.5f, note, Paint.Align.LEFT)
-        btn(c, RectF(w / 2 - 70 * dp, h - 52 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { optPage = 0 }
+        // VSync
+        small(c, "VSYNC", tl, h * 0.52f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val vy = h * 0.545f; val vw = (tr - tl - 6 * dp) / 2f
+        btn(c, RectF(tl, vy, tl + vw, vy + 24 * dp), "ON", Settings.vsync, a) {
+            Settings.putVsync(true); Store.saveProfile()
+        }
+        btn(c, RectF(tl + vw + 6 * dp, vy, tr, vy + 24 * dp), "OFF", !Settings.vsync, a) {
+            Settings.putVsync(false); Store.saveProfile()
+        }
+        small(c, if (Settings.vsync) "Locked to display refresh (no tearing)." else "Uncapped present (MAILBOX/IMMEDIATE when available).", tl, vy + 36 * dp, 9f, note, Paint.Align.LEFT)
+        // FPS limit
+        small(c, "FPS LIMIT  ·  ${Settings.fpsLimitName()}", tl, h * 0.68f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val caps = listOf(30, 60, 90, 120, 144, 240, 0)  // 0 = Ultimate
+        val cn = caps.size; val cw = (tr - tl - (cn - 1) * 4 * dp) / cn; val cy = h * 0.705f; var cx = tl
+        for (cap in caps) {
+            val lab = if (cap == 0) "ULT" else "$cap"
+            btn(c, RectF(cx, cy, cx + cw, cy + 24 * dp), lab, Settings.fpsLimit == cap, a) {
+                Settings.putFpsLimit(cap); Store.saveProfile()
+            }
+            cx += cw + 4 * dp
+        }
+        small(c, "20–290 or Ultimate (no cap). Applies on top of VSync.", tl, cy + 36 * dp, 9f, note, Paint.Align.LEFT)
+        btn(c, RectF(w / 2 - 70 * dp, h - 48 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { optPage = 0 }
     }
 
     private fun drawPause(c: Canvas) {
@@ -589,7 +611,8 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
                 r = Renderer(Settings.frameW, Settings.frameH); px = IntArray(r.W * r.H); bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
                 oldR.close(); oldBmp.recycle()
             }
-            val now = System.nanoTime(); val dt = (now - last) / 1e9; last = now; t += dt
+            val frameStart = System.nanoTime()
+            val now = frameStart; val dt = (now - last) / 1e9; last = now; t += dt
             if (dt > 0) fps = fps * 0.9 + (1 / dt) * 0.1
             levelsAnim += ((if (levelsOpen && scr == Scr.MAIN) 1f else 0f) - levelsAnim) * min(1f, dt.toFloat() * 14f)
             val fg: Game; val fo: Collection<DoubleArray>; val fh: Boolean   // what to draw this frame
@@ -623,6 +646,16 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
                 }
                 hits = cur; fovR = nextFov; fogR = nextFog; scrollR = nextScroll
             } finally { unlock(c) }
+            // FPS limit (software pace). 0 = Ultimate. Works with or without VSync.
+            val limit = Settings.fpsLimit
+            if (limit > 0) {
+                val targetNs = 1_000_000_000L / limit
+                val spent = System.nanoTime() - frameStart
+                val sleepNs = targetNs - spent
+                if (sleepNs > 1_000_000L) { // only sleep if > 1 ms remains
+                    try { Thread.sleep(sleepNs / 1_000_000L, (sleepNs % 1_000_000L).toInt()) } catch (_: InterruptedException) {}
+                }
+            }
         }
     }
 }

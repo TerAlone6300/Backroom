@@ -326,12 +326,28 @@ fun main(argv: Array<String>) {
                 Settings.PRESETS.map { (f, nm) -> Triple(Settings.frac(f), "$nm ($f)", Settings.fov == f) })
             fogR = slider(g2, "FOG", Settings.fogName(), tl, tr, (hh * 0.56).toInt(), (hh * 0.64).toInt(), Settings.fog / 100.0,
                 Settings.FOG_PRESETS.map { (f, nm) -> Triple(f / 100.0, nm, Settings.fog == f) })
-            txt(g2, "FRAME SIZE  ·  ${Settings.frameH}p (${Settings.frameW}×${Settings.frameH})", tl, (hh * 0.74).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            txt(g2, "FRAME SIZE  ·  ${Settings.frameH}p", tl, (hh * 0.52).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
             run { val fw = (tr - tl - 4 * 6) / 5; var fx = tl
-                for (f in Settings.FRAME_HEIGHTS) { btn(g2, Rectangle(fx, (hh * 0.755).toInt(), fw, hh / 16), "${f}p", Settings.frameH == f, ac) { Settings.putFrame(f); Store.saveProfile() }; fx += fw + 6 } }
+                for (f in Settings.FRAME_HEIGHTS) { btn(g2, Rectangle(fx, (hh * 0.535).toInt(), fw, hh / 18), "${f}p", Settings.frameH == f, ac) { Settings.putFrame(f); Store.saveProfile() }; fx += fw + 6 } }
+            txt(g2, "VSYNC  ·  ${if (Settings.vsync) "ON" else "OFF"}", tl, (hh * 0.62).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            run {
+                val bw = (tr - tl - 6) / 2
+                btn(g2, Rectangle(tl, (hh * 0.635).toInt(), bw, hh / 18), "ON", Settings.vsync, ac) { Settings.putVsync(true); Store.saveProfile() }
+                btn(g2, Rectangle(tl + bw + 6, (hh * 0.635).toInt(), bw, hh / 18), "OFF", !Settings.vsync, ac) { Settings.putVsync(false); Store.saveProfile() }
+            }
+            txt(g2, "FPS LIMIT  ·  ${Settings.fpsLimitName()}", tl, (hh * 0.72).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            run {
+                val caps = listOf(30, 60, 90, 120, 144, 240, 0)
+                val cw = (tr - tl - (caps.size - 1) * 4) / caps.size; var cx0 = tl
+                for (cap in caps) {
+                    val lab = if (cap == 0) "ULT" else "$cap"
+                    btn(g2, Rectangle(cx0, (hh * 0.735).toInt(), cw, hh / 18), lab, Settings.fpsLimit == cap, ac) { Settings.putFpsLimit(cap); Store.saveProfile() }
+                    cx0 += cw + 4
+                }
+            }
             if (playing) { // the difficulty belongs to the game being played (chosen when it was started)
             // difficulty
-            val dl = (w * 0.64).toInt(); val dw = (w * 0.28).toInt(); val bh = hh / 16; val gp = hh / 100; var y = (hh * 0.34).toInt()
+            val dl = (w * 0.64).toInt(); val dw = (w * 0.28).toInt(); val bh = hh / 18; val gp = hh / 100; var y = (hh * 0.34).toInt()
             txt(g2, "DIFFICULTY  ·  THIS GAME", dl, (hh * 0.30).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
             val cols = arrayOf(Color(150, 200, 150), ac, Color(240, 160, 80), Color(235, 70, 55), Color(110, 210, 200), Color(200, 30, 30))
             for (i in DIFFS.indices) {
@@ -341,7 +357,7 @@ fun main(argv: Array<String>) {
             }
             txt(g2, if (playing && g.hardcoreRun) "Hardcore run: difficulty is locked." else DIFFS[Settings.diff].blurb, dl, y + hh / 30, Font("SansSerif", Font.ITALIC, hh / 50), Color(200, 195, 160), false)
             }
-            txt(g2, "drag the sliders  ·  LEFT / RIGHT  fine tune FOV", cx, hh - hh / 7, Font("SansSerif", Font.ITALIC, hh / 56), Color(170, 165, 140))
+            txt(g2, "drag the sliders  ·  LEFT / RIGHT  fine tune FOV", cx, hh - hh / 9, Font("SansSerif", Font.ITALIC, hh / 56), Color(170, 165, 140))
             val bb = hh / 14
             btn(g2, Rectangle(cx - 90, hh - bb - hh / 40, 180, bb), "BACK", false, ac) { closeOptions() }
         }
@@ -503,6 +519,17 @@ fun main(argv: Array<String>) {
             cur.get().let { it.r.render(it.px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME) }
         }
         panel.repaint()
-        Thread.sleep(8)
+        // FPS limit (0 = Ultimate). Desktop has no real VSync control on the Swing path; sleep still paces the loop.
+        val limit = Settings.fpsLimit
+        if (limit > 0) {
+            val targetNs = 1_000_000_000L / limit
+            val spent = System.nanoTime() - now
+            val sleepNs = targetNs - spent
+            if (sleepNs > 1_000_000L) {
+                try { Thread.sleep(sleepNs / 1_000_000L, (sleepNs % 1_000_000L).toInt()) } catch (_: InterruptedException) {}
+            }
+        } else {
+            Thread.sleep(1) // yield a little when uncapped so the UI stays responsive
+        }
     }
 }

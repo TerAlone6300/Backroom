@@ -62,8 +62,10 @@ public:
     VkFramePresenter(const VkFramePresenter&) = delete;
     VkFramePresenter& operator=(const VkFramePresenter&) = delete;
 
-    /** platformExts: the instance extension(s) the surface factory needs (VK_KHR_surface is added here). */
-    bool init(const std::vector<const char*>& platformExts, SurfaceFactory factory, uint32_t frameW, uint32_t frameH);
+    /** platformExts: the instance extension(s) the surface factory needs (VK_KHR_surface is added here).
+     *  preferVsync: true → FIFO (display sync); false → MAILBOX then IMMEDIATE when available. */
+    bool init(const std::vector<const char*>& platformExts, SurfaceFactory factory, uint32_t frameW, uint32_t frameH,
+              bool preferVsync = true);
     /**
      * Draws one frame. false = unrecoverable (device or surface lost): stop using this presenter.
      * true also covers "skipped this frame" (window minimised, no image available within 100 ms).
@@ -134,6 +136,7 @@ private:
     VkExtent2D extent_{};
     bool extentFromView_ = false;  // the surface lets us pick the size: follow the view
     bool needRecreate_ = false;
+    bool preferVsync_ = true;  // FIFO when true; MAILBOX/IMMEDIATE when false
     std::vector<VkImage> images_;
     std::vector<VkImageView> views_;
     std::vector<VkFramebuffer> framebuffers_;
