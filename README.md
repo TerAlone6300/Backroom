@@ -35,6 +35,14 @@ Khám phá những không gian vô tận mang cảm giác siêu thực, tìm đ�
 - **Fog:** Có thể tùy chỉnh cường độ sương mù.
 - **Difficulty:** Bao gồm Easy, Normal, Hard và Nightmare.
 
+
+## Hướng dẫn sinh tồn
+
+Tìm hiểu cấp độ nguy hiểm, mức độ an toàn, khả năng di chuyển và mật độ thực thể của từng Level thông qua tài liệu:
+
+- **[HOW_TO_PLAY.md](HOW_TO_PLAY.md)** — Hướng dẫn sinh tồn và thông tin phân loại Survival Difficulty Class của các Level.
+
+
 ## Multiplayer
 
 Backrooms hỗ trợ kết nối với máy chủ Multiplayer.
