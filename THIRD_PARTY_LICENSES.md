@@ -14,7 +14,7 @@ The source code of Backrooms is distributed under:
 
 GNU General Public License v3.0 only (GPL-3.0-only).
 
-See "LICENSE" (./LICENSE).
+See [LICENSE](LICENSE).
 
 Third-Party Content
 
