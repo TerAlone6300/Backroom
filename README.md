@@ -163,7 +163,7 @@ Backrooms xin ghi nhận công sức sáng tạo của cộng đồng Backrooms,
 - **Các cộng tác viên:** Ghi nhận những cá nhân đã đóng góp mã nguồn, sửa lỗi, cải thiện hiệu năng và phát triển trò chơi.
 - **Cộng đồng Backrooms:** Cảm ơn cộng đồng đã xây dựng, mở rộng và duy trì thế giới Backrooms.
 
-Danh sách chi tiết các nội dung bên thứ ba, tác giả, nguồn gốc và giấy phép tương ứng sẽ được ghi nhận trong tài liệu `THIRD_PARTY_LICENSES.md` (nếu có).
+Danh sách chi tiết các nội dung bên thứ ba, tác giả, nguồn gốc và giấy phép tương ứng sẽ được ghi nhận trong tài liệu `THIRD_PARTY_LICENSES.md`.
 
 ### Tuyên bố miễn trừ
 
