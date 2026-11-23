@@ -1,4 +1,4 @@
-name: Compile
+name: Simple Compile
 
 on:
   pull_request:
