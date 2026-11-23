@@ -19,7 +19,8 @@
     X(DestroyInstance) X(EnumeratePhysicalDevices) X(GetPhysicalDeviceProperties)                                  \
     X(GetPhysicalDeviceQueueFamilyProperties) X(GetPhysicalDeviceMemoryProperties)                                 \
     X(GetPhysicalDeviceSurfaceSupportKHR) X(GetPhysicalDeviceSurfaceCapabilitiesKHR)                               \
-    X(GetPhysicalDeviceSurfaceFormatsKHR) X(EnumerateDeviceExtensionProperties) X(CreateDevice)                    \
+    X(GetPhysicalDeviceSurfaceFormatsKHR) X(GetPhysicalDeviceSurfacePresentModesKHR)                               \
+    X(EnumerateDeviceExtensionProperties) X(CreateDevice)                                                          \
     X(GetDeviceProcAddr) X(DestroySurfaceKHR)
 
 #define VK_DEVICE_FNS(X)                                                                                           \
