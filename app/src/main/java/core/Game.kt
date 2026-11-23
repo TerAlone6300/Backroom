@@ -22,6 +22,8 @@ class Game {
     @Volatile var eatReq = false; @Volatile var drinkReq = false // set by the UI threads, handled in update()
     var lobbyT = 0.0; @Volatile var halluc = 0.0; val ghosts = CopyOnWriteArrayList<Ghost>(); private var ghostCd = 4.0
     @Volatile var supplies: List<Supply> = emptyList()
+    @Volatile var garden: List<Supply> = emptyList()   // Level 414's way in nearby: glowing vines and the arch (Supply.type Garden.T_VINE / T_GATE)
+    private var wishT = 0.0                            // Level 414: how long you have stood still wishing to leave
     private val taken = HashSet<Long>()
     private var scanX = Int.MIN_VALUE; private var scanY = 0
     private class Origin(val level: Int, val x: Double, val y: Double, val a: Double, val pitch: Double, val ents: List<Entity>)
@@ -41,13 +43,14 @@ class Game {
     /** Unlock a level for the drawer, unless Explore is set to not save the levels you pass through. */
     private fun remember(lv: Int) { if (!Settings.explore || ExploreRules.SAVE_VISITED_LEVELS) Progress.unlock(lv) }
     private fun cellKey(x: Int, y: Int) = (x.toLong() shl 32) xor (y.toLong() and 0xFFFFFFFFL)
-    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false; warnGrave = false; stage = 0; slipT = 0.0; camH = 0.5 }
+    private fun resetLevelState() { taken.clear(); scanX = Int.MIN_VALUE; supplies = emptyList(); garden = emptyList(); wishT = 0.0; Hortus.path = null; ghosts.clear(); halluc = 0.0; lobbyT = 0.0; ghostCd = 4.0; warnHallu = false; warnJerry = false; roomsDone.clear(); roomT = 0.0; trialT = 0.0; warnTrial = false; warnReworked = false; warnGrave = false; stage = 0; slipT = 0.0; camH = 0.5 }
     /** Supplies within 13 cells (redone whenever you change cell); what the renderer draws and what you can pick up. */
     private fun rescan(cx: Int, cy: Int) {
         scanX = cx; scanY = cy
         val out = ArrayList<Supply>()
         for (dy in -13..13) for (dx in -13..13) { val t = supplyAt(level, cx + dx, cy + dy); if (t != 0 && cellKey(cx + dx, cy + dy) !in taken) out.add(Supply(cx + dx, cy + dy, t)) }
         supplies = out
+        garden = Garden.near(level, cx, cy, 13)
     }
 
     /** True when other players cannot see you (Level 0 and Level 201), except inside the Manila Room. */
@@ -69,6 +72,7 @@ class Game {
         level = lv; levelT = 0.0; dead = false; deadT = 0.0; danger = 0.0; noclip = 0.0; arrival = arrived; resetLevelState()
         if (lv == LV_CITY) City.warm()
         if (lv == LV_CITY) say("LEVEL 11 EFFECT  ·  hostile entities are less likely to attack you")
+        if (lv == LV_HORTUS) say("STAND STILL AND WISH TO LEAVE  ·  a path of flowers will open")
         stamina = 1.0; exhausted = false; pitch = 0.0; a = Math.random() * 6.283
         remember(lv)
         // Level 0: you land somewhere in the endless maze, a few minutes' walk from the (unique) Manila Room.
@@ -90,14 +94,15 @@ class Game {
         repeat(if (n == 0) 0 else max(1, (n * df.count).roundToInt())) { i ->
             val type = if (cast.isEmpty()) ld.eType else cast[i % cast.size]
             if (level == LV_CITY && type == E_SMILER) { val s = spawnInBuilding(); if (s != null) { entities.add(s); return@repeat } }
-            if (type == E_FACELING && level != LV_CITY && group != null) {
+            if (((type == E_FACELING && level != LV_CITY) || (type == E_IVLANIA && i % 3 != 0)) && group != null) { // Ivlania live in communities of three
                 val a2 = Math.random() * 6.283; val r2 = 1.5 + Math.random() * 1.5; val q2 = findFree(group!!.x + cos(a2) * r2, group!!.y + sin(a2) * r2)
-                entities.add(Entity(q2.first, q2.second, type)); return@repeat
+                entities.add(Entity(q2.first, q2.second, type).also { if (type == E_IVLANIA) it.home = group!!.home }); return@repeat
             }
             val ang = Math.random() * 6.283; val d = (11 + Math.random() * 8) * df.spawn
             val q = findFree(x + cos(ang) * d, y + sin(ang) * d)
             val e = Entity(q.first, q.second, type); entities.add(e)
             if (type == E_FACELING) group = e
+            if (type == E_IVLANIA && i % 3 == 0) { group = e; e.home = intArrayOf(floor(q.first).toInt(), floor(q.second).toInt(), 0, 0) }
         }
     }
 
@@ -140,6 +145,25 @@ class Game {
     }
 
     /** Level 11 Effect, for Hounds and Facelings that have not been provoked. Returns true when it handled the entity. */
+    /** Ivlania: gentle plant folk. They stay near their community, wander slowly, and when you come near they turn to watch you and come a little closer. */
+    private fun ivlania(e: Entity, d: Double, ex: Double, ey: Double, dt: Double) {
+        val hm = e.home; var speed = 0.5
+        if (d < 7 && d > 1.8 && los(level, e.x, e.y, x, y)) { e.dir = atan2(ey, ex); speed = if (d > 3.2) 0.45 else 0.0 }
+        else if (hm != null && hypot(hm[0] + 0.5 - e.x, hm[1] + 0.5 - e.y) > 9) e.dir = atan2(hm[1] + 0.5 - e.y, hm[0] + 0.5 - e.x)
+        else e.dir += (Math.random() - 0.5) * dt * 1.5
+        if (speed > 0) { val r = move(level, e.x, e.y, cos(e.dir), sin(e.dir), speed * dt); if (r.first == e.x && r.second == e.y) e.dir += 1.6; e.x = r.first; e.y = r.second }
+    }
+
+    /** Level 414. Wishing to leave (standing still) opens a path of flowers; walking to its end takes you to the level the flowers stand for. */
+    private fun updateGarden(dt: Double, fwd: Double, str: Double) {
+        val p = Hortus.path
+        if (p == null) {
+            if (abs(fwd) > 0.05 || abs(str) > 0.05) wishT = max(0.0, wishT - dt * 2) else wishT += dt
+            if (wishT >= WISH_SECONDS) { wishT = 0.0; Hortus.openPath(x, y, a)?.let { say("A PATH OF FLAGSTONES OPENS  ·  ${it.exit.flower} LINE THE WAY") } }
+        } else if (p.reached(x, y)) enter(p.exit.level, "YOU FOLLOWED THE ${p.exit.flower}")
+        else if (hypot(p.end[0] + 0.5 - x, p.end[1] + 0.5 - y) > 70) { Hortus.path = null; wishT = 0.0 } // you wandered off: the wish fades
+    }
+
     private fun calmBehaviour(e: Entity, d: Double, ex: Double, ey: Double, dt: Double): Boolean {
         var speed = 0.0
         if (e.type == 4) { // Faceling: walks up to you and tags along; after a while it loses interest
@@ -273,6 +297,7 @@ class Game {
                 // if (e.irr > CityRules.PROVOKE_SECONDS) { e.provoked = true; say("IT DID NOT LIKE THAT") }
                 e.passive = true; calmBehaviour(e, d, ex, ey, dt); continue
             }
+            if (e.type == E_IVLANIA) { e.passive = true; ivlania(e, d, ex, ey, dt); continue }
             e.passive = false
             val smilerHome = e.home
             val awake = e.type != 2 || smilerHome == null || (floor(x).toInt() in smilerHome[0]..smilerHome[2] && floor(y).toInt() in smilerHome[1]..smilerHome[3]) // a building's Smiler sleeps until you come in
@@ -342,6 +367,9 @@ class Game {
             taken.add(cellKey(sp.x, sp.y)); if (sp.type == 1) rations++ else water++
             say(if (sp.type == 1) "+1 RATION" else "+1 ALMOND WATER"); scanX = Int.MIN_VALUE
         }
+        // Level 414: the arch at the end of the vines leads into the garden; in the garden, wishing to leave opens the way out
+        for (o in garden) if (o.type == Garden.T_GATE && hypot(o.x + 0.5 - x, o.y + 0.5 - y) < 0.8) { enter(LV_HORTUS, "YOU FOLLOWED THE VINES THROUGH THE ARCH"); return }
+        if (level == LV_HORTUS) updateGarden(dt, fwd, str)
     }
 
     /** After the death animation: the trial pulls you out of danger on Class 3+ levels (sometimes), or you simply start over. */

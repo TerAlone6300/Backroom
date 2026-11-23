@@ -14,15 +14,21 @@ object CityRules {
     const val PROVOKE_SECONDS = 2.5
 }
 
+/** Level 414: how long you stand still wishing to leave before a path opens. */
+const val WISH_SECONDS = 4.0
+
 /** Entity types (Entity.type). Sprite codes from 20 up are items (see Renderer). */
 const val E_HOUND = 1; const val E_SMILER = 2; const val E_STEALER = 3; const val E_FACELING = 4
 const val E_DEATHMOTH = 5; const val E_CLUMP = 6; const val E_JERRY = 7; const val E_CULTIST = 8
-const val E_WARRIOR = 9; const val E_TARANTULA = 10
+const val E_WARRIOR = 9; const val E_TARANTULA = 10; const val E_IVLANIA = 11
 const val S_RATION = 20; const val S_WATER = 21; const val S_LAMP = 22
+const val S_VINE = 23; const val S_GATE = 24   // Level 414's way in: a glowing vine, and the arch the vines lead to (see Garden)
+const val S_FLOWER = 30                         // 30..41: the flowers along Level 414's way out, one kind per destination (Garden.EXITS)
+const val S_CUBE = 42                           // the glowing cube hanging in Level 414's iron greenhouse
 /** Monsters Explore mode makes friendly. */
 fun isMonster(type: Int) = type == E_HOUND || type == E_SMILER || type == E_STEALER || type == E_FACELING || type == E_CLUMP || type == E_TARANTULA
 /** Entities that never hurt you and do not make the lights flicker. */
-fun isHarmless(type: Int) = type == E_DEATHMOTH || type == E_JERRY || type == E_CULTIST || type == E_WARRIOR
+fun isHarmless(type: Int) = type == E_DEATHMOTH || type == E_JERRY || type == E_CULTIST || type == E_WARRIOR || type == E_IVLANIA
 /** Touching one ends the run (a Faceling only while it hunts you). */
 fun isLethal(e: Entity) = isMonster(e.type) && (e.type != E_FACELING || e.chase)
 
@@ -58,7 +64,7 @@ fun supplyAt(lv: Int, x: Int, y: Int): Int {
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
     if (lv == LV_CITY && City.cacheCell(x, y)) return if (h(x, y, 191) >= 0.22) 0 else if (h(x, y, 881) < 0.4) 2 else 1 // stocked building
-    val p = if (lv == 0) 0.12 else if (lv == LV_CITY) 0.0006 else 0.0010
+    val p = if (lv == 0) 0.12 else if (lv == LV_CITY) 0.0006 else if (lv == LV_HORTUS) 0.0035 else 0.0010 // the garden grows plenty
     if (h(x, y, 880 + lv) >= p) return 0
     return if (h(x, y, 881) < 0.4) 2 else 1
 }

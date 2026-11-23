@@ -211,6 +211,34 @@ vec4 sprite(int type, float u, float v, float dim, bool fr) {
         if (leg) return SC(70.0, 50.0, 38.0, dim);
         return vec4(0.0);
     }
+    if (type == 23) {  // glowing vine: a wavy stem, pairs of leaves, a pale bud at each tip
+        float sway = 0.25 * sin(v * 9.0);
+        bool leaf = false, bud = false;
+        for (int k = 0; k < 5; k++) {
+            float vk = 0.12 + 0.17 * float(k), side = (k % 2 == 0) ? 1.0 : -1.0, cx = sway + side * 0.22;
+            if (sq((u - cx) / 0.2) + sq((v - vk - 0.02) / 0.06) < 1.0) leaf = true;
+            if (sq((u - cx - side * 0.16) / 0.05) + sq((v - vk - 0.02) / 0.03) < 1.0) bud = true;
+        }
+        if (bud) return PC(210.0, 255.0, 235.0);
+        if (abs(u - sway) < 0.07 + 0.03 * v) return SC(60.0, 210.0, 130.0, dim);
+        return leaf ? SC(96.0, 255.0, 160.0, dim) : vec4(0.0);
+    }
+    if (type == 24) {  // an arch covered in vines and flowers, the garden's light showing through
+        float au = abs(u);
+        bool outer = v < 0.35 ? au < sqrt(max(0.0, 1.0 - sq((0.35 - v) / 0.35))) : au < 1.0;
+        if (!outer) return vec4(0.0);
+        bool opening = v > 0.08 && (v < 0.4 ? au < 0.58 * sqrt(max(0.0, 1.0 - sq((0.4 - v) / 0.32))) : au < 0.58);
+        if (opening) {
+            if (au < 0.12 && v > 0.7) return PC(240.0, 230.0, 190.0);
+            if (au > 0.42 && v > 0.55) return PC(120.0, 176.0, 90.0);
+            return PC(floor(255.0 - 45.0 * v), floor(252.0 - 12.0 * v), floor(220.0 - 50.0 * v));
+        }
+        int iu = int(u * 16.0), iv = int(v * 16.0);
+        if (hashd(iu, iv, 4141) < 0.07) return hashd(iu, iv, 4142) < 0.5 ? SC(240.0, 120.0, 160.0, dim) : SC(250.0, 245.0, 235.0, dim);
+        if (hashd(iu, iv, 4143) < 0.38) return SC(70.0 + floor(hashd(iu, iv, 4144) * 50.0), 150.0, 70.0, dim);
+        if (au >= 0.64 && au <= 0.72 && (int(v * 14.0) % 2) == 0) return SC(238.0, 238.0, 228.0, dim);
+        return SC(28.0, 48.0, 40.0, dim);
+    }
     if (type == 22) {  // lamp item
         if (v < 0.06 && abs(u) < 0.9) return PC(255.0, 236.0, 170.0);
         return abs(u) < 0.18 ? SC(70.0, 72.0, 80.0, dim) : vec4(0.0);

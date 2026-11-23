@@ -54,6 +54,17 @@ fun allCases(): List<() -> Case> {
     out.add(mk("lv1_items_and_players", 1, a = 0.0, others = true, setup = { g ->
         g.supplies = listOf(Supply(g.x.toInt() + 2, g.y.toInt(), S_RATION), Supply(g.x.toInt() + 3, g.y.toInt() + 1, S_WATER), Supply(g.x.toInt() + 3, g.y.toInt() - 1, S_LAMP))
     }))
+    // Level 414's way in, in two very different levels: the gate and the glowing vines ahead of the player
+    fun garden(g: Game) {
+        val dx = Math.cos(g.a); val dy = Math.sin(g.a); val l = ArrayList<Supply>()
+        for ((k, ty) in listOf(1.8 to Garden.T_VINE, 2.6 to Garden.T_VINE, 3.4 to Garden.T_VINE, 4.6 to Garden.T_GATE, 5.8 to Garden.T_VINE)) {
+            val cx = Math.floor(g.x + dx * k).toInt(); val cy = Math.floor(g.y + dy * k).toInt()
+            if (free(g.level, cx + 0.5, cy + 0.5)) l.add(Supply(cx, cy, ty))
+        }
+        g.garden = l
+    }
+    out.add(mk("lv1_garden_gate", 1, a = 0.0, setup = ::garden))
+    out.add(mk("lv6_garden_dark", 6, a = 2.0, setup = ::garden))
     out.add(mk("lv2_zone_a", 2, 31.5, 22.5, a = 1.2))
     out.add(mk("lv2_zone_b", 2, 83.5, 61.5, a = 3.0))
     out.add(mk("lv6_lantern", 6, a = 2.0))

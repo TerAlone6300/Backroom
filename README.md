@@ -133,13 +133,13 @@ Khung hình mặc định ở 1080p (1920×1080). Có thể đổi trong Options
 - **Canvas**: CPU vẽ toàn bộ khung hình rồi Android hiển thị. Hoạt động trên mọi máy.
 - **OpenGL ES** (cần ES 3.0, `gpu/GlesPresenter.kt`) và **Vulkan** (`app/src/main/cpp`, nạp `libvulkan` lúc chạy nên `minSdk` vẫn là 21): GPU tự vẽ hình 3D (sàn, trần, tường, sprite, hiệu ứng, minimap) từ dữ liệu cảnh bằng một shader dùng chung cho cả hai, `app/src/main/assets/shaders/scene.glsl`. CPU chỉ còn chiếu tia theo từng cột, tính đèn nhấp nháy và danh sách sprite (`Renderer.buildScene`), tốn chưa tới 1 ms thay vì hàng chục ms ở 1080p, và chi phí này không tăng theo độ phân giải.
 
-Ba level thế giới mở (City, Island, Graveyard) có mặt đất và tòa nhà được sinh bằng mã riêng, chưa chuyển sang shader, nên ở đó CPU vẫn vẽ khung hình rồi đưa lên GPU để phóng to.
+Bốn level thế giới mở (City, Island, Graveyard và Hortus Aeturnus) có mặt đất và tòa nhà được sinh bằng mã riêng, chưa chuyển sang shader, nên ở đó CPU vẫn vẽ khung hình rồi đưa lên GPU để phóng to.
 
 Nếu backend được chọn không khởi động được, trò chơi tự quay về Canvas và Options hiển thị lý do.
 
 **Desktop** (Linux + Mesa): `java -jar backrooms.jar --zink` chạy pipeline OpenGL của Java2D trên Zink (OpenGL chạy trên Vulkan). Nếu GPU của bạn chỉ có Vulkan CPU như lavapipe, đặt thêm `LIBGL_ALWAYS_SOFTWARE=1`.
 
-**Kiểm thử trên máy tính**: `tools/vk-host-test/run.sh [rộng cao]` chạy cùng mã C++ với bản Android trên X11, rồi đọc lại cửa sổ để kiểm tra màu, chiều ảnh, đổi kích thước và tạo lại bề mặt. `tools/scene-test` so sánh bộ kết xuất GPU với bản CPU: `Cases.kt` dựng 29 tình huống (mọi level mê cung, các loại quái, vật phẩm, hiệu ứng, minimap), `SceneDump.kt` xuất khung CPU cùng dữ liệu cảnh, rồi `run.sh` (Vulkan) và `run-gles.sh` (OpenGL ES) vẽ lại bằng shader và so theo khối 16×16, vì nhiễu hạt cùng cường độ nhưng khác dãy số ngẫu nhiên. Cần `libvulkan-dev`, `libx11-dev` và một driver Vulkan (`mesa-vulkan-drivers`). Sau khi sửa shader trong `app/src/main/cpp/shaders`, chạy `compile_shaders.sh` (cần `glslang-tools`) để cập nhật `vk_shaders.h`.
+**Kiểm thử trên máy tính**: `tools/vk-host-test/run.sh [rộng cao]` chạy cùng mã C++ với bản Android trên X11, rồi đọc lại cửa sổ để kiểm tra màu, chiều ảnh, đổi kích thước và tạo lại bề mặt. `tools/scene-test` so sánh bộ kết xuất GPU với bản CPU: `Cases.kt` dựng 29 tình huống (mọi level mê cung, các loại quái, vật phẩm, hiệu ứng, minimap), `SceneDump.kt` xuất khung CPU cùng dữ liệu cảnh, rồi `run.sh` (Vulkan) và `run-gles.sh` (OpenGL ES) vẽ lại bằng shader và so theo khối 16×16, vì nhiễu hạt cùng cường độ nhưng khác dãy số ngẫu nhiên. Cần `libvulkan-dev`, `libx11-dev` và một driver Vulkan (`mesa-vulkan-drivers`). `tools/hortus-test/HortusTest.kt` kiểm tra cơ chế của Level 414 (cổng và dây leo, ước muốn rời đi, đường ra, Ivlania, lưu game). Sau khi sửa shader trong `app/src/main/cpp/shaders`, chạy `compile_shaders.sh` (cần `glslang-tools`) để cập nhật `vk_shaders.h`.
 ## Links & Social 
  
 - Discord: https://discord.gg/DfpyAs9TaZ

@@ -193,6 +193,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     }
 
     /** Sprite shapes in (u,v) space; u in -1..1 across, v in 0..1 top to bottom. 0 = transparent. */
+    private val IVLANIA_FLOWERS = arrayOf(intArrayOf(160, 112, 214), intArrayOf(214, 50, 80), intArrayOf(250, 210, 50), intArrayOf(250, 190, 205), intArrayOf(240, 90, 120), intArrayOf(250, 225, 60), intArrayOf(134, 86, 196), intArrayOf(96, 120, 232))
     private fun sprite(type: Int, u: Double, v: Double, dim: Double, fr: Boolean = false): Int { // fr = friendly (Explore): green eyes, soft glow
         val dark = pack((16 * dim).toInt(), (14 * dim).toInt(), (10 * dim).toInt())
         return when (type) {
@@ -267,6 +268,53 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
                 else if (body && v in 0.52..0.82) (if (abs(u) < 0.2 && v in 0.6..0.74) sc(150, 98, 52, dim) else sc(240, 226, 190, dim))
                 else sc(170, 212, 238, dim)
             }
+            in Hortus.IVLANIA..Hortus.IVLANIA + 7 -> { // Ivlania: a flower covers the whole head but the mouth and jaw; leaf-shaped sleeves hide the vine hands
+                val fc = IVLANIA_FLOWERS[type - Hortus.IVLANIA]
+                val dx = u / 0.5; val dy = (v - 0.10) / 0.105; val rr = hypot(dx, dy); val ang = atan2(dy, dx)
+                if (v in 0.155..0.215 && abs(u) < 0.2 - (v - 0.155) * 1.2) { if (v in 0.178..0.19 && abs(u) < 0.1) sc(70, 50, 50, dim) else sc(176, 210, 130, dim) }       // mouth and jaw
+                else if (v < 0.205 && rr < 1.0 + 0.12 * cos(8 * ang)) { if (rr < 0.22) sc(250, 214, 80, dim) else { val k = 0.85 + 0.3 * abs(cos(4 * ang)); sc((fc[0] * k).toInt(), (fc[1] * k).toInt(), (fc[2] * k).toInt(), dim) } }  // the flower
+                else if (v in 0.2..0.24 && abs(u) < 0.14) sc(176, 210, 130, dim)
+                else if (v in 0.24..0.62 && sq((abs(u) - 0.6) / 0.25) + sq((v - 0.42) / 0.17) < 1) { if (abs(abs(u) - 0.6) < 0.025) sc(60, 120, 60, dim) else sc(98, 170, 84, dim) } // leaf sleeves
+                else if (v in 0.24..0.62 && abs(u) < 0.5 - (v - 0.24) * 0.25) { if (v in 0.44..0.47) sc(110, 150, 80, dim) else sc(232, 226, 196, dim) }                          // tunic and a belt of vine
+                else if (v >= 0.62 && abs(abs(u) - 0.2) < 0.14) sc(96, 86, 54, dim) else 0
+            }
+            S_VINE -> { // glowing vine: a wavy stem with pairs of leaves and a pale bud at each tip
+                val sway = 0.25 * sin(v * 9.0)
+                var leaf = false; var bud = false
+                for (k in 0..4) { val vk = 0.12 + 0.17 * k; val side = if (k % 2 == 0) 1.0 else -1.0; val cx = sway + side * 0.22
+                    if (sq((u - cx) / 0.2) + sq((v - vk - 0.02) / 0.06) < 1) leaf = true
+                    if (sq((u - cx - side * 0.16) / 0.05) + sq((v - vk - 0.02) / 0.03) < 1) bud = true }
+                if (bud) pack(210, 255, 235) else if (abs(u - sway) < 0.07 + 0.03 * v) sc(60, 210, 130, dim) else if (leaf) sc(96, 255, 160, dim) else 0
+            }
+            S_GATE -> { // an arch covered in vines and flowers, with the garden's light showing through
+                val au = abs(u)
+                val outer = if (v < 0.35) au < sqrt(max(0.0, 1 - sq((0.35 - v) / 0.35))) else au < 1.0
+                if (!outer) 0
+                else if (v > 0.08 && (if (v < 0.4) au < 0.58 * sqrt(max(0.0, 1 - sq((0.4 - v) / 0.32))) else au < 0.58)) {
+                    if (au < 0.12 && v > 0.7) pack(240, 230, 190) else if (au > 0.42 && v > 0.55) pack(120, 176, 90) else pack((255 - 45 * v).toInt(), (252 - 12 * v).toInt(), (220 - 50 * v).toInt())
+                }
+                else if (h((u * 16).toInt(), (v * 16).toInt(), 4141) < 0.07) { if (h((u * 16).toInt(), (v * 16).toInt(), 4142) < 0.5) sc(240, 120, 160, dim) else sc(250, 245, 235, dim) }
+                else if (h((u * 16).toInt(), (v * 16).toInt(), 4143) < 0.38) sc(70 + (h((u * 16).toInt(), (v * 16).toInt(), 4144) * 50).toInt(), 150, 70, dim)
+                else if (au in 0.64..0.72 && (v * 14).toInt() % 2 == 0) sc(238, 238, 228, dim)
+                else sc(28, 48, 40, dim)
+            }
+            in S_FLOWER..S_FLOWER + 4 -> { // a flowering bush along the way out: the blossoms say where the path leads
+                val fl = Garden.EXITS[type - S_FLOWER]
+                if (sq(u / 0.95) + sq((v - 0.62) / 0.38) >= 1) 0
+                else {
+                    val cu = u * 6 + 6; val cv = v * 6; val iu = cu.toInt(); val iv = cv.toInt()
+                    val dens = when (fl.shape) { 0 -> 0.35; 1 -> 0.65; else -> 0.45 }; val r2 = when (fl.shape) { 0 -> 0.04; 1 -> 0.015; else -> 0.025 }
+                    val ddx = cu - iu - 0.5; val ddy = cv - iv - 0.5
+                    if (h(iu, iv, 4600 + type) < dens && ddx * ddx + ddy * ddy < r2) { if (fl.shape == 2 && ddx * ddx + ddy * ddy < 0.008) sc(255, 255, 240, dim) else sc(fl.r, fl.g, fl.b, dim) }
+                    else sc(40 + (h(iu, iv, 4601) * 40).toInt(), 120 + (h(iu, iv, 4602) * 50).toInt(), 50, dim)
+                }
+            }
+            S_CUBE -> { // the glowing cube: a cube inside a cube, joined at the corners
+                val w = (v - 0.5) * 2.0; var d = 9.0
+                for (s in intArrayOf(-1, 1)) for (q in doubleArrayOf(0.8, 0.4)) { d = min(d, segd(u, w, -q, s * q, q, s * q)); d = min(d, segd(u, w, s * q, -q, s * q, q)) }
+                for (sx in intArrayOf(-1, 1)) for (sy in intArrayOf(-1, 1)) d = min(d, segd(u, w, sx * 0.4, sy * 0.4, sx * 0.8, sy * 0.8))
+                if (d < 0.05) pack(170, 255, 90) else if (d < 0.12) sc(60, 170, 60, dim) else 0
+            }
             1 -> { // Hound: low quadruped, red eye
                 val body = sq((u - 0.1) / 0.7) + sq((v - 0.55) / 0.32) < 1
                 val head = sq((u + 0.72) / 0.26) + sq((v - 0.38) / 0.22) < 1
@@ -291,8 +339,9 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             items.add(doubleArrayOf(o[0], o[1], 0.0))
         }
         ow?.extraSprites(x, y, items)
-        for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
+        for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, (if (e.type == E_IVLANIA) Hortus.IVLANIA + Math.floorMod(System.identityHashCode(e), 8) else e.type).toDouble()))
         for (sp in g.supplies) items.add(doubleArrayOf(sp.x + 0.5, sp.y + 0.5, if (sp.type == 1) S_RATION.toDouble() else S_WATER.toDouble()))
+        for (o in g.garden) items.add(doubleArrayOf(o.x + 0.5, o.y + 0.5, if (o.type == Garden.T_GATE) S_GATE.toDouble() else S_VINE.toDouble()))
         for (gh in g.ghosts) if (sin(t * 11 + gh.x * 3) > -0.4) items.add(doubleArrayOf(gh.x, gh.y, gh.type.toDouble(), 1.0)) // hallucinations flicker in and out
         items.sortByDescending { sq(it[0] - x) + sq(it[1] - y) }
         return items
@@ -392,12 +441,12 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
-            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; S_VINE -> 0.95; S_GATE -> 1.0; S_CUBE -> 0.6; in S_FLOWER..S_FLOWER + 4 -> 0.5; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; S_VINE -> 0.5; S_GATE -> 0.8; S_CUBE -> 1.0; in S_FLOWER..S_FLOWER + 4 -> 1.1; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
-            val bottom = hz + (full * ch).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly
-            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 20) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
+            val bottom = hz + (full * ch).toInt() - (when (type) { E_DEATHMOTH -> (full * 0.3).toInt(); S_CUBE -> (full * 0.6).toInt(); else -> 0 }); val top = bottom - sh // moths and the cube float
+            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type in 20..49) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it } // supplies stay easy to spot; ghosts are dim
             for (col in max(0, sx - sw / 2)..min(W - 1, sx + sw / 2)) {
                 if (ty >= zb[col]) continue
                 val u = (col - sx) / (sw / 2.0)
@@ -527,12 +576,12 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
-            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
-            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
+            val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; S_VINE -> 0.95; S_GATE -> 1.0; S_CUBE -> 0.6; in S_FLOWER..S_FLOWER + 4 -> 0.5; else -> 0.9 }
+            val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; S_VINE -> 0.5; S_GATE -> 0.8; S_CUBE -> 1.0; in S_FLOWER..S_FLOWER + 4 -> 1.1; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
             val sw = (sh * wk).toInt().coerceAtLeast(2)
-            val bottom = hz + (full * g.camH).toInt() - (if (type == E_DEATHMOTH) (full * 0.3).toInt() else 0); val top = bottom - sh // moths fly
-            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type >= 20) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it }
+            val bottom = hz + (full * g.camH).toInt() - (when (type) { E_DEATHMOTH -> (full * 0.3).toInt(); S_CUBE -> (full * 0.6).toInt(); else -> 0 }); val top = bottom - sh // moths and the cube float
+            val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type in 20..49) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it }
             boxes.add(doubleArrayOf(sx.toDouble(), sw.toDouble(), top.toDouble(), sh.toDouble(), type.toDouble(), dim, if (o.size > 3 && o[3] == 2.0) 1.0 else 0.0, ty))
         }
         val ns = min(boxes.size, Scene.MAX_SPR); val first = boxes.size - ns // too many: the farthest ones are dropped

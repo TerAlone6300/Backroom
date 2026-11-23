@@ -35,10 +35,10 @@ interface LevelSpec {
     fun darkness(x: Int, y: Int): Double = 1.0
 }
 
-/** Level numbers are the Backrooms Wikidot numbers (the one unnumbered level, The Grave, is -1): the id of a level IS its number (0 1 2 3 4 5 6 11 37 75 139 182 201), in this order. */
+/** Level numbers are the Backrooms Wikidot numbers (the one unnumbered level, The Grave, is -1): the id of a level IS its number (0 1 2 3 4 5 6 11 37 75 139 182 201 414), in this order. */
 val LEVEL_SPECS: List<LevelSpec> = listOf(
     Level00Threshold, Level01HabitableZone, Level02AbandonedUtilityHalls, Level03ElectricalStation, Level04AbandonedOffice, Level05TerrorHotel, Level06LightsOut,
-    Level11TheCity, Level37Sublimity, Level75Liminality, Level139WarriorsTrial, Level182CityOfDusk, Level201Threshold, LevelUnnumberedGrave)
+    Level11TheCity, Level37Sublimity, Level75Liminality, Level139WarriorsTrial, Level182CityOfDusk, Level201Threshold, Level414HortusAeturnus, LevelUnnumberedGrave)
 
 val LEVELS: List<LevelDef> = LEVEL_SPECS.map { it.def }
 private val SPECS_BY_ID: Map<Int, LevelSpec> = LEVEL_SPECS.associateBy { it.def.id }
@@ -51,3 +51,4 @@ fun levelDef(id: Int): LevelDef = levelSpec(id).def
 const val LV_THRESHOLD = 0   // Level 0: yellow halls, the Manila Room, Lobby hallucinations
 const val LV_CITY = 11       // Level 11: The City That Never Sleeps
 const val LV_SUBLIMITY = 37  // Level 37: pools (water shimmer)
+const val LV_HORTUS = 414    // Level 414: Hortus Aeturnus, the endless garden (entered through Garden gates, left by a path of flowers)
