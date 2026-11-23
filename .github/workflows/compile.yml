@@ -1,4 +1,4 @@
-name: Compile
+name: Compile And Release 
 
 on:
   pull_request:
