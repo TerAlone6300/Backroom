@@ -67,6 +67,7 @@ fun main(argv: Array<String>) {
         val me = runningJar(); if (me != null && args.size > 1 && applyUpdate(File(args[1]), me)) return
     }
     loadDesktopVersion()
+    SkinLibrary.init(listOf(File(System.getProperty("user.home"), ".backrooms/skins"))) // external skin files: .png, .brpack, .mcpack
     Store.init(File(System.getProperty("user.home"), ".backrooms"))
 
     val cur = java.util.concurrent.atomic.AtomicReference(FrameBuf(Settings.frameW, Settings.frameH))
@@ -91,13 +92,25 @@ fun main(argv: Array<String>) {
     fun startGame(addr: String = "", lv: Int = 0, load: SaveData? = null) {
         net?.close()
         val a = addr.trim()
-        net = if (a.isEmpty()) null else a.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start() } }
+        net = if (a.isEmpty()) null else a.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start(); SkinLibrary.applyTo(it) } }
         if (load != null) g.restore(load) else g.newGame(lv)
         slot = load?.id; playT = 0.0; levelsOpen = false; recenter = true
         playing = true; scr = Scr.GAME; setCursor(true)
     }
     fun pickDifficulty(i: Int) { if (i in DIFFS.indices) { Settings.putDiff(i); startGame(pendAddr, pendLv) } }
     fun openSaves() { saves = Store.list(); scrollY = 0; levelsOpen = false; scr = Scr.SAVES }
+    // Dressing Room: pick a skin from the built-in default and the external files (.png, .brpack / .mcpack skin packs)
+    var drBack = Scr.MAIN; var drMsg = ""
+    fun openDressing(from: Scr) { SkinLibrary.reload(); drBack = from; drMsg = ""; scrollY = 0; levelsOpen = false; scr = Scr.DRESSING }
+    fun importSkins() = SwingUtilities.invokeLater {
+        val fc = JFileChooser(); fc.isMultiSelectionEnabled = true
+        fc.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Skins and skin packs (*.png, *.brpack, *.mcpack)", "png", "brpack", "mcpack")
+        if (fc.showOpenDialog(panel) == JFileChooser.APPROVE_OPTION) {
+            val ok = fc.selectedFiles.count { f -> runCatching { f.inputStream().use { SkinLibrary.import(f.name, it) } }.getOrNull() != null }
+            drMsg = if (ok > 0) "Imported $ok file(s)" else "Nothing imported: not a valid skin or skin pack"
+        }
+    }
+    fun openSkinFolder() { runCatching { SkinLibrary.dirs.firstOrNull()?.let { it.mkdirs(); Desktop.getDesktop().open(it) } }.onFailure { drMsg = "Folder: " + (SkinLibrary.dirs.firstOrNull()?.path ?: "?") } }
     fun openOptions(from: Scr) { optBack = from; levelsOpen = false; scr = Scr.OPTIONS }
     fun closeOptions() { Store.saveProfile(); scr = optBack }
     fun pause() { scr = Scr.PAUSE; setCursor(false) }
@@ -116,6 +129,7 @@ fun main(argv: Array<String>) {
         when (scr) {
             Scr.MAIN -> if (levelsOpen) levelsOpen = false else System.exit(0)
             Scr.SAVES, Scr.MULTI -> scr = Scr.MAIN
+            Scr.DRESSING -> scr = drBack
             Scr.DIFFICULTY -> scr = pickBack
             Scr.OPTIONS -> closeOptions()
             Scr.PAUSE -> resume()
@@ -140,6 +154,7 @@ fun main(argv: Array<String>) {
                 Scr.OPTIONS -> drawOptions(g2)
                 Scr.DIFFICULTY -> drawPicker(g2)
                 Scr.MAIN -> drawMain(g2)
+                Scr.DRESSING -> drawDressing(g2)
             }
         }
 
@@ -184,11 +199,65 @@ fun main(argv: Array<String>) {
             val bw = (w * 0.28).toInt(); val bh = hh / 12; val gap = hh / 50; var y = (hh * 0.32).toInt()
             btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "PLAY", true, ac) { openSaves() }; y += bh + gap
             btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "MULTIPLAYER", false, ac) { levelsOpen = false; scr = Scr.MULTI }; y += bh + gap
-            btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "OPTIONS", false, ac) { openOptions(Scr.MAIN) }
+            btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "OPTIONS", false, ac) { openOptions(Scr.MAIN) }; y += bh + gap
+            val dr = Rectangle(cx - bw / 2, y, bw, bh)
+            btn(g2, dr, "", false, ac) { openDressing(Scr.MAIN) }
+            txt(g2, "DRESSING ROOM", dr.x + bh + 16, dr.y + dr.height * 46 / 100, spaced(Font("SansSerif", Font.BOLD, dr.height / 3), 0.2f), ac, false)
+            txt(g2, SkinLibrary.selected().name, dr.x + bh + 16, dr.y + dr.height * 82 / 100, spaced(Font("SansSerif", Font.PLAIN, dr.height / 4), 0.1f), Color(220, 212, 185), false)
+            drawSkinPreview(g2, Rectangle(dr.x + 6, dr.y - bh / 2, bh * 3 / 4 + 10, bh * 3 / 2 - 2)) // the DR button shows the skin you wear, popping out above it
             txt(g2, "Level 0 is endless and empty. Some walls aren't solid — push into one to noclip out.", cx, (hh * 0.76).toInt(),
                 Font("SansSerif", Font.ITALIC, hh / 48), Color(210, 200, 170))
             txt(g2, "ENTER  play   ·   ARROW on the left edge  unlocked levels   ·   ESC  quit", cx, hh - hh / 24, Font("SansSerif", Font.PLAIN, hh / 56), Color(200, 195, 160))
             drawLevels(g2)
+        }
+
+        private var pvImg: BufferedImage? = null
+        /** Rotating preview of a skin (default: the selected one) inside [rc]; transparent around the figure. */
+        fun drawSkinPreview(g2: Graphics2D, rc: Rectangle, e: SkinEntry = SkinLibrary.selected()) {
+            val ph = min(rc.height, 320); val pw = max(8, (rc.width.toDouble() * ph / rc.height).toInt())
+            var img = pvImg; if (img == null || img.width != pw || img.height != ph) { img = BufferedImage(pw, ph, BufferedImage.TYPE_INT_ARGB); pvImg = img }
+            SkinPreview.render(e.texture, pw, ph, System.nanoTime() / 1e9, (img.raster.dataBuffer as DataBufferInt).data)
+            val old = g2.getRenderingHint(RenderingHints.KEY_INTERPOLATION)
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+            g2.drawImage(img, rc.x, rc.y, rc.width, rc.height, null)
+            if (old != null) g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, old)
+        }
+
+        fun drawDressing(g2: Graphics2D) {
+            val w = width; val hh = height; val ac = Color(levelDef(0).accent)
+            dim(g2, 210, 190)
+            heading(g2, "DRESSING ROOM", ac, 0.15)
+            val list = Rectangle((w * 0.07).toInt(), (hh * 0.24).toInt(), (w * 0.46).toInt(), (hh * 0.60).toInt())
+            val rh = hh / 11; val gp = hh / 90; val skins = SkinLibrary.entries; val sel = SkinLibrary.selectedId
+            scrollY = scrollY.coerceIn(0, max(0, skins.size * (rh + gp) - list.height))
+            var hover: SkinEntry? = null
+            val oldClip = g2.clip; g2.clip = list
+            for ((k, e) in skins.withIndex()) {
+                val rc = Rectangle(list.x, list.y + k * (rh + gp) - scrollY, list.width, rh)
+                if (rc.y + rc.height < list.y || rc.y > list.y + list.height) continue
+                val on = e.id == sel
+                g2.color = Color(0, 0, 0, 175); g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14)
+                if (on) { g2.color = Color(ac.red, ac.green, ac.blue, 60); g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14) }
+                val over = rc.contains(mpos) && list.contains(mpos); if (over) hover = e
+                g2.stroke = BasicStroke(if (over || on) 3f else 2f); g2.color = if (on) ac else Color(ac.red, ac.green, ac.blue, 150); g2.drawRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14)
+                txt(g2, e.name, rc.x + 16, rc.y + rc.height * 45 / 100, Font("Serif", Font.BOLD, hh / 34), Color.WHITE, false)
+                txt(g2, e.source, rc.x + 16, rc.y + rc.height - 10, spaced(Font("SansSerif", Font.BOLD, hh / 70), 0.12f), Color(190, 185, 160), false)
+                if (on) txt(g2, "WEARING", rc.x + rc.width - 16 - g2.getFontMetrics(spaced(Font("SansSerif", Font.BOLD, hh / 60), 0.2f)).stringWidth("WEARING"), rc.y + rc.height * 45 / 100, spaced(Font("SansSerif", Font.BOLD, hh / 60), 0.2f), ac, false)
+                hitClip(rc, list) { SkinLibrary.select(e, net) }
+            }
+            g2.clip = oldClip
+            val pv = Rectangle((w * 0.60).toInt(), list.y, (w * 0.33).toInt(), (hh * 0.44).toInt())
+            g2.color = Color(0, 0, 0, 150); g2.fillRoundRect(pv.x, pv.y, pv.width, pv.height, 14, 14)
+            g2.color = Color(ac.red, ac.green, ac.blue, 120); g2.stroke = BasicStroke(2f); g2.drawRoundRect(pv.x, pv.y, pv.width, pv.height, 14, 14)
+            val shown = hover ?: SkinLibrary.selected()
+            drawSkinPreview(g2, Rectangle(pv.x + pv.width / 4, pv.y + 6, pv.width / 2, pv.height - 36), shown)
+            txt(g2, shown.name, pv.x + pv.width / 2, pv.y + pv.height - 12, spaced(Font("SansSerif", Font.BOLD, hh / 50), 0.15f), Color(220, 212, 185))
+            val bw = pv.width; val bh = hh / 14; val gap = hh / 80; var y = pv.y + pv.height + gap * 2
+            btn(g2, Rectangle(pv.x, y, bw / 2 - gap / 2, bh), "IMPORT", false, ac) { importSkins() }
+            btn(g2, Rectangle(pv.x + bw / 2 + gap / 2, y, bw / 2 - gap / 2, bh), "FOLDER", false, ac) { openSkinFolder() }; y += bh + gap
+            btn(g2, Rectangle(pv.x, y, bw, bh), "BACK", true, ac) { scr = drBack }
+            val dir = SkinLibrary.dirs.firstOrNull()?.path ?: ""
+            txt(g2, if (drMsg.isNotEmpty()) drMsg else "Put .png or .brpack / .mcpack files in $dir", w / 2, hh - hh / 24, Font("SansSerif", Font.PLAIN, hh / 56), Color(200, 195, 160))
         }
 
         /** Side drawer with the unlocked levels; the arrow tab on the left edge opens it. */
@@ -351,10 +420,18 @@ fun main(argv: Array<String>) {
             dim(g2, 190, 190)
             heading(g2, "PAUSED", ac, 0.21)
             txt(g2, "${d.label}  ·  ${d.name}", cx, (hh * 0.28).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 40), 0.2f), Color(220, 212, 185))
-            val bw = (w * 0.28).toInt(); val bh = hh / 12; val gap = hh / 50; var y = (hh * 0.35).toInt()
-            btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "RESUME", true, ac) { resume() }; y += bh + gap
-            btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "OPTIONS", false, ac) { openOptions(Scr.PAUSE) }; y += bh + gap
-            btn(g2, Rectangle(cx - bw / 2, y, bw, bh), "SAVE & QUIT", false, Color(235, 110, 90)) { saveAndQuit() }
+            val bw = (w * 0.28).toInt(); val bh = hh / 12; val gap = hh / 50; val top = (hh * 0.35).toInt()
+            val lx = (w * 0.08).toInt(); val rx = w - lx - bw   // buttons on the left, skin preview + DR on the right
+            var y = top
+            btn(g2, Rectangle(lx, y, bw, bh), "RESUME", true, ac) { resume() }; y += bh + gap
+            btn(g2, Rectangle(lx, y, bw, bh), "OPTIONS", false, ac) { openOptions(Scr.PAUSE) }; y += bh + gap
+            btn(g2, Rectangle(lx, y, bw, bh), "SAVE & QUIT", false, Color(235, 110, 90)) { saveAndQuit() }
+            val pv = Rectangle(rx, top, bw, 2 * bh + gap)
+            g2.color = Color(0, 0, 0, 150); g2.fillRoundRect(pv.x, pv.y, pv.width, pv.height, 14, 14)
+            g2.color = Color(ac.red, ac.green, ac.blue, 120); g2.stroke = BasicStroke(2f); g2.drawRoundRect(pv.x, pv.y, pv.width, pv.height, 14, 14)
+            drawSkinPreview(g2, Rectangle(pv.x + pv.width / 4, pv.y - pv.height * 45 / 100, pv.width / 2, pv.height * 135 / 100 - 18)) // pops up above the panel
+            txt(g2, SkinLibrary.selected().name, rx + bw / 2, pv.y + pv.height - 7, spaced(Font("SansSerif", Font.BOLD, hh / 60), 0.12f), Color(220, 212, 185))
+            btn(g2, Rectangle(rx, top + 2 * (bh + gap), bw, bh), "DRESSING ROOM", false, ac) { openDressing(Scr.PAUSE) }
         }
 
         fun drawHud(g2: Graphics2D) {

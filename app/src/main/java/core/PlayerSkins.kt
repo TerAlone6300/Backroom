@@ -164,7 +164,7 @@ object PlayerSkinRenderer {
         Part(PlayerSkinLayout.torso, PlayerSkinLayout.torsoOverlay, -0.13, 0.02, 0.72, 0.26, 0.13, 0.54),
         Part(PlayerSkinLayout.rightArm, PlayerSkinLayout.rightArmOverlay, -0.27, 0.02, 0.72, 0.12, 0.12, 0.54),
         Part(PlayerSkinLayout.leftArm, PlayerSkinLayout.leftArmOverlay, 0.15, 0.02, 0.72, 0.12, 0.12, 0.54),
-        Part(PlayerSkinLayout.head, PlayerSkinLayout.headOverlay, -0.13, 0.02, 1.26, 0.26, 0.26, 0.26)
+        Part(PlayerSkinLayout.head, PlayerSkinLayout.headOverlay, -0.13, -0.045, 1.26, 0.26, 0.26, 0.26)
     )
 
     /**
@@ -185,7 +185,11 @@ object PlayerSkinRenderer {
         val cosCamera = kotlin.math.cos(cameraYaw); val sinCamera = kotlin.math.sin(cameraYaw)
         val focal = screenWidth / (2.0 * kotlin.math.tan(fovRadians / 2.0))
         val scale = worldHeight / MODEL_HEIGHT
-        for (part in parts) {
+        val order = parts.sortedByDescending { p -> // painter's algorithm: far parts first, so near arms / legs cover the torso
+            val cx = p.x + p.width / 2; val cz = p.z + p.depth / 2
+            (worldX + (-rightX * cx + forwardX * cz) * scale - cameraX) * cosCamera + (worldY + (-rightY * cx + forwardY * cz) * scale - cameraY) * sinCamera
+        }
+        for (part in order) {
             drawBox(pixels, screenWidth, screenHeight, wallDepth, skin, part, false, worldX, worldY, rightX, rightY,
                 forwardX, forwardY, cameraX, cameraY, cosCamera, sinCamera, focal, horizon, scale, verticalScale, distanceLight)
             drawBox(pixels, screenWidth, screenHeight, wallDepth, skin, part, true, worldX, worldY, rightX, rightY,
@@ -203,32 +207,31 @@ object PlayerSkinRenderer {
         val z0 = part.z - expand; val z1 = part.z + part.depth + expand
         val y0 = part.bottom - expand; val y1 = part.bottom + part.height + expand
         fun project(px: Double, py: Double, pz: Double): Vertex? {
-            val dx = worldX + (rightX * px + forwardX * pz) * scale - cameraX
-            val dy = worldY + (rightY * px + forwardY * pz) * scale - cameraY
+            val dx = worldX + (-rightX * px + forwardX * pz) * scale - cameraX
+            val dy = worldY + (-rightY * px + forwardY * pz) * scale - cameraY
             val depth = dx * cosCamera + dy * sinCamera
             if (depth <= 0.05) return null
             val side = -dx * sinCamera + dy * cosCamera
             return Vertex(sw / 2.0 + side * focal / depth, horizon - py * scale * vScale * focal / depth, depth, 0.0, 0.0)
         }
-        val corners = arrayOf(
-            project(x0, y0, z1), project(x1, y0, z1), project(x1, y1, z1), project(x0, y1, z1),
-            project(x0, y0, z0), project(x1, y0, z0), project(x1, y1, z0), project(x0, y1, z0)
-        )
-        val indices = arrayOf(
-            intArrayOf(0, 1, 2, 3), intArrayOf(5, 0, 3, 6), intArrayOf(4, 5, 6, 7),
-            intArrayOf(1, 4, 7, 2), intArrayOf(3, 2, 6, 7), intArrayOf(4, 1, 0, 5)
+        // Corners of each face as seen from OUTSIDE: top-left, top-right, bottom-right, bottom-left. +x is the model's left, +z its front.
+        val faces = arrayOf(
+            arrayOf(project(x0, y1, z1), project(x1, y1, z1), project(x1, y0, z1), project(x0, y0, z1)), // front
+            arrayOf(project(x0, y1, z0), project(x0, y1, z1), project(x0, y0, z1), project(x0, y0, z0)), // the model's right side
+            arrayOf(project(x1, y1, z0), project(x0, y1, z0), project(x0, y0, z0), project(x1, y0, z0)), // back
+            arrayOf(project(x1, y1, z1), project(x1, y1, z0), project(x1, y0, z0), project(x1, y0, z1)), // the model's left side
+            arrayOf(project(x0, y1, z0), project(x1, y1, z0), project(x1, y1, z1), project(x0, y1, z1)), // top
+            arrayOf(project(x0, y0, z1), project(x1, y0, z1), project(x1, y0, z0), project(x0, y0, z0))  // bottom
         )
         val uvFaces = (if (overlay) part.overlay else part.base).faces
-        for (faceIndex in indices.indices) {
-            val ids = indices[faceIndex]
-            val vertices = ids.map { corners[it] ?: return@map null }
-            if (vertices.any { it == null }) continue
-            val face = uvFaces[faceIndex]
-            val uv = arrayOf(face.u to face.v, face.u + face.width to face.v,
-                face.u + face.width to face.v + face.height, face.u to face.v + face.height)
-            val v = vertices.filterNotNull().mapIndexed { i, vertex -> vertex.copy(u = uv[i].first.toDouble(), v = uv[i].second.toDouble()) }
-            triangle(pixels, sw, sh, wallDepth, skin, v[0], v[1], v[2], light)
-            triangle(pixels, sw, sh, wallDepth, skin, v[0], v[2], v[3], light)
+        for (fi in faces.indices) {
+            val q = faces[fi]
+            val tl = q[0] ?: continue; val tr = q[1] ?: continue; val br = q[2] ?: continue; val bl = q[3] ?: continue
+            if ((tr.x - tl.x) * (br.y - tr.y) - (tr.y - tl.y) * (br.x - tr.x) <= 0.0) continue // faces away from the camera
+            val f = uvFaces[fi]; val u0 = f.u.toDouble(); val v0 = f.v.toDouble(); val u1 = u0 + f.width - 0.001; val v1 = v0 + f.height - 0.001
+            val a = tl.copy(u = u0, v = v0); val b = tr.copy(u = u1, v = v0); val c = br.copy(u = u1, v = v1); val d = bl.copy(u = u0, v = v1)
+            triangle(pixels, sw, sh, wallDepth, skin, a, b, c, light)
+            triangle(pixels, sw, sh, wallDepth, skin, a, c, d, light)
         }
     }
 

@@ -5,6 +5,8 @@ package com.backrooms.game
 // top-centre = pause / options, top-right corner = toggle minimap.
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
+import android.provider.OpenableColumns
 import android.graphics.*
 import android.os.Build
 import android.os.Bundle
@@ -20,6 +22,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
+        SkinLibrary.init(listOfNotNull(getExternalFilesDir("skins"), File(filesDir, "backrooms/skins"))) // external skin files: .png, .brpack, .mcpack
         Store.init(File(filesDir, "backrooms"))
         updates = UpdateHelper(this); updates.loadVersion()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -40,9 +43,15 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() { if (view?.back() != true) super.onBackPressed() }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == GameView.REQ_SKIN && resultCode == RESULT_OK && data != null) view?.importSkins(data)
+    }
 }
 
 class GameView(private val act: Activity, private val gpu: GpuFrameView) : SurfaceView(act), SurfaceHolder.Callback, Runnable {
+    companion object { const val REQ_SKIN = 4711 } // file picker request code (skin import)
     private var r = Renderer(Settings.frameW, Settings.frameH)  // replaced (on the render thread) when the frame size changes
     private var px = IntArray(r.W * r.H)
     private var bmp = Bitmap.createBitmap(r.W, r.H, Bitmap.Config.ARGB_8888)
@@ -97,7 +106,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
 
     private fun startGame(addr: String = "", lv: Int = 0, load: SaveData? = null) {
         net?.close()
-        net = if (addr.isEmpty()) null else addr.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start() } }
+        net = if (addr.isEmpty()) null else addr.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start(); SkinLibrary.applyTo(it) } }
         if (load != null) g.restore(load) else g.newGame(lv)
         slot = load?.id
         playT = 0.0; jx = 0f; jy = 0f; leftId = -1; rightId = -1; runOn = false; levelsOpen = false
@@ -116,6 +125,42 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
     private fun openPicker(lv: Int, addr: String, from: Scr) { pendLv = lv; pendAddr = addr; pickBack = from; levelsOpen = false; scr = Scr.DIFFICULTY }
 
     private fun openSaves() { saves = Store.list(); scrollY = 0f; levelsOpen = false; scr = Scr.SAVES }
+
+    // Dressing Room: pick a skin from the built-in default and the external files (.png, .brpack / .mcpack skin packs)
+    private var drBack = Scr.MAIN; @Volatile private var drMsg = ""
+    private fun openDressing(from: Scr) { SkinLibrary.reload(); drBack = from; drMsg = ""; scrollY = 0f; levelsOpen = false; scr = Scr.DRESSING }
+
+    private fun pickSkinFiles() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        try { act.startActivityForResult(i, REQ_SKIN) } catch (_: Exception) { drMsg = "No file picker found" }
+    }
+
+    /** The file picker returned: copy the chosen .png / .brpack / .mcpack files into the skins folder. */
+    fun importSkins(data: Intent) {
+        val uris = ArrayList<android.net.Uri>()
+        data.data?.let { uris.add(it) }
+        data.clipData?.let { cd -> for (k in 0 until cd.itemCount) uris.add(cd.getItemAt(k).uri) }
+        Thread {
+            var ok = 0
+            for (u in uris) runCatching {
+                val name = act.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cu -> if (cu.moveToFirst()) cu.getString(0) else null } ?: "skin.png"
+                act.contentResolver.openInputStream(u)?.use { if (SkinLibrary.import(name, it) != null) ok++ }
+            }
+            drMsg = if (ok > 0) "Imported $ok file(s)" else "Nothing imported: not a valid skin or skin pack"
+        }.start()
+    }
+
+    private val pvPaint = Paint()
+    private var pvBmp: Bitmap? = null; private var pvPx = IntArray(0)
+    /** Rotating preview of a skin (default: the selected one) inside [rc]; transparent around the figure. */
+    private fun drawSkinPreview(c: Canvas, rc: RectF, e: SkinEntry = SkinLibrary.selected()) {
+        val ph = min(rc.height().toInt(), 240).coerceAtLeast(8); val pw = max(8, (rc.width() * ph / rc.height()).toInt())
+        if (pvPx.size != pw * ph) pvPx = IntArray(pw * ph)
+        var b = pvBmp; if (b == null || b.width != pw || b.height != ph) { b = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888); pvBmp = b }
+        SkinPreview.render(e.texture, pw, ph, System.nanoTime() / 1e9, pvPx)
+        b.setPixels(pvPx, 0, pw, 0, 0, pw, ph)
+        c.drawBitmap(b, null, rc, pvPaint)
+    }
     private fun openOptions(from: Scr) { optBack = from; optPage = 0; levelsOpen = false; scr = Scr.OPTIONS }
     private fun closeOptions() { Store.saveProfile(); scr = optBack }
     private fun setRenderer(k: Int) { Settings.renderer = k; Store.saveProfile(); gpu.post { gpu.visibility = if (k == R_CANVAS) View.GONE else View.VISIBLE } }
@@ -139,6 +184,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
             Scr.PAUSE -> scr = Scr.GAME
             Scr.OPTIONS -> if (optPage == 1) optPage = 0 else closeOptions()
             Scr.SAVES, Scr.MULTI -> scr = Scr.MAIN
+            Scr.DRESSING -> scr = drBack
             Scr.DIFFICULTY -> scr = pickBack
             Scr.MAIN -> if (levelsOpen) levelsOpen = false else return false
         }
@@ -275,10 +321,15 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         dim(c, 210, 170)
         heading(c, "THE BACKROOMS", a, h * 0.19f)
         small(c, "POCKET EDITION  ·  MULTIPLAYER", w / 2, h * 0.26f, 11f, Color.rgb(220, 212, 185), spacing = 0.3f, bold = true)
-        val bw = min(w * 0.34f, 300 * dp); val bh = 42 * dp; val gap = 10 * dp; var y = h * 0.33f
+        val bw = min(w * 0.34f, 300 * dp); val bh = 38 * dp; val gap = 8 * dp; var y = h * 0.32f
         btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "PLAY", true, a) { openSaves() }; y += bh + gap
         btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "MULTIPLAYER", false, a) { levelsOpen = false; askIp() }; y += bh + gap
-        btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "OPTIONS", false, a) { openOptions(Scr.MAIN) }
+        btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "OPTIONS", false, a) { openOptions(Scr.MAIN) }; y += bh + gap
+        val dr = RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh)
+        btn(c, dr, "", false, a) { openDressing(Scr.MAIN) }
+        small(c, "DRESSING ROOM", dr.left + bh + 14 * dp, dr.top + bh * 0.46f, 10.5f, a, Paint.Align.LEFT, 0.2f, true)
+        small(c, SkinLibrary.selected().name, dr.left + bh + 14 * dp, dr.top + bh * 0.82f, 8.5f, Color.rgb(220, 212, 185), Paint.Align.LEFT)
+        drawSkinPreview(c, RectF(dr.left + 6 * dp, dr.top - bh / 2, dr.left + 6 * dp + bh * 0.75f + 10 * dp, dr.bottom - 2 * dp)) // shows the skin you wear, popping out above the button
         small(c, "Level 0 is endless and empty. Some walls aren't solid — push into one to noclip out.", w / 2, h * 0.86f, 11f, Color.rgb(210, 200, 170))
         small(c, "Left: move  ·  Right: look around  ·  RUN button: walk / run  ·  Back: pause", w / 2, h - 14 * dp, 10f, Color.rgb(200, 195, 160))
         drawLevels(c)
@@ -449,10 +500,53 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         dim(c, 190, 190)
         heading(c, "PAUSED", a, h * 0.21f)
         small(c, "${d.label}  ·  ${d.name}", w / 2, h * 0.28f, 11f, Color.rgb(220, 212, 185), spacing = 0.2f, bold = true)
-        val bw = min(w * 0.34f, 300 * dp); val bh = 42 * dp; val gap = 10 * dp; var y = h * 0.35f
-        btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "RESUME", true, a) { scr = Scr.GAME }; y += bh + gap
-        btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "OPTIONS", false, a) { openOptions(Scr.PAUSE) }; y += bh + gap
-        btn(c, RectF(w / 2 - bw / 2, y, w / 2 + bw / 2, y + bh), "SAVE & QUIT", false, Color.rgb(235, 110, 90)) { saveAndQuit() }
+        val bw = min(w * 0.34f, 300 * dp); val bh = 42 * dp; val gap = 10 * dp; val top = h * 0.35f
+        val lx = max(w * 0.08f, 16 * dp); val rx = w - lx - bw   // buttons on the left, skin preview + DR on the right
+        var y = top
+        btn(c, RectF(lx, y, lx + bw, y + bh), "RESUME", true, a) { scr = Scr.GAME }; y += bh + gap
+        btn(c, RectF(lx, y, lx + bw, y + bh), "OPTIONS", false, a) { openOptions(Scr.PAUSE) }; y += bh + gap
+        btn(c, RectF(lx, y, lx + bw, y + bh), "SAVE & QUIT", false, Color.rgb(235, 110, 90)) { saveAndQuit() }
+        val pv = RectF(rx, top, rx + bw, top + 2 * bh + gap)
+        pFill.style = Paint.Style.FILL; pFill.color = Color.argb(150, 0, 0, 0); c.drawRoundRect(pv, 16 * dp, 16 * dp, pFill)
+        pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 2 * dp; pFill.color = acc(d, 120); c.drawRoundRect(pv, 16 * dp, 16 * dp, pFill)
+        val ph = pv.height() * 1.35f - 18 * dp   // the figure pops up above the panel
+        drawSkinPreview(c, RectF(pv.centerX() - ph * 0.3f, pv.top - pv.height() * 0.45f, pv.centerX() + ph * 0.3f, pv.top - pv.height() * 0.45f + ph))
+        small(c, SkinLibrary.selected().name, pv.centerX(), pv.bottom - 7 * dp, 9f, Color.rgb(220, 212, 185), spacing = 0.12f, bold = true)
+        btn(c, RectF(rx, top + 2 * (bh + gap), rx + bw, top + 2 * (bh + gap) + bh), "DRESSING ROOM", false, a) { openDressing(Scr.PAUSE) }
+    }
+
+    private fun drawDressing(c: Canvas) {
+        val w = c.width.toFloat(); val h = c.height.toFloat(); val a = acc(levelDef(0))
+        dim(c, 210, 190)
+        heading(c, "DRESSING ROOM", a, h * 0.17f)
+        val list = RectF(w * 0.05f, h * 0.26f, w * 0.55f, h - 26 * dp)
+        val rh = 46 * dp; val gp = 6 * dp; val skins = SkinLibrary.entries; val sel = SkinLibrary.selectedId
+        scrollY = scrollY.coerceIn(0f, max(0f, skins.size * (rh + gp) - list.height()))
+        nextScroll = list
+        c.save(); c.clipRect(list)
+        skins.forEachIndexed { k, e ->
+            val rc = RectF(list.left, list.top + k * (rh + gp) - scrollY, list.right, list.top + k * (rh + gp) - scrollY + rh)
+            if (rc.bottom < list.top || rc.top > list.bottom) return@forEachIndexed
+            val on = e.id == sel
+            pFill.style = Paint.Style.FILL; pFill.color = Color.argb(175, 0, 0, 0); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
+            if (on) { pFill.color = acc(levelDef(0), 60); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill) }
+            pFill.style = Paint.Style.STROKE; pFill.strokeWidth = (if (on) 3f else 2f) * dp; pFill.color = if (on) a else acc(levelDef(0), 150); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
+            small(c, e.name, rc.left + 12 * dp, rc.top + 20 * dp, 12f, Color.WHITE, Paint.Align.LEFT, 0.02f, true)
+            small(c, e.source, rc.left + 12 * dp, rc.bottom - 9 * dp, 8.5f, Color.rgb(190, 185, 160), Paint.Align.LEFT, 0.06f, true)
+            if (on) small(c, "WEARING", rc.right - 12 * dp, rc.top + 20 * dp, 9f, a, Paint.Align.RIGHT, 0.2f, true)
+            hitClip(rc, list) { SkinLibrary.select(e, net) }
+        }
+        c.restore()
+        val pv = RectF(w * 0.60f, h * 0.26f, w * 0.95f, h * 0.70f)
+        pFill.style = Paint.Style.FILL; pFill.color = Color.argb(150, 0, 0, 0); c.drawRoundRect(pv, 16 * dp, 16 * dp, pFill)
+        pFill.style = Paint.Style.STROKE; pFill.strokeWidth = 2 * dp; pFill.color = acc(levelDef(0), 120); c.drawRoundRect(pv, 16 * dp, 16 * dp, pFill)
+        drawSkinPreview(c, RectF(pv.left + pv.width() * 0.25f, pv.top + 6 * dp, pv.right - pv.width() * 0.25f, pv.bottom - 24 * dp))
+        small(c, SkinLibrary.selected().name, pv.centerX(), pv.bottom - 9 * dp, 10f, Color.rgb(220, 212, 185), spacing = 0.15f, bold = true)
+        val by = pv.bottom + 10 * dp; val bh = 38 * dp; val half = (pv.width() - 8 * dp) / 2
+        btn(c, RectF(pv.left, by, pv.left + half, by + bh), "IMPORT", false, a) { pickSkinFiles() }
+        btn(c, RectF(pv.left + half + 8 * dp, by, pv.right, by + bh), "BACK", true, a) { scr = drBack }
+        val dir = SkinLibrary.dirs.firstOrNull()?.path ?: ""
+        small(c, if (drMsg.isNotEmpty()) drMsg else "IMPORT a .png / .brpack / .mcpack, or copy it to $dir", w / 2, h - 10 * dp, 9f, Color.rgb(200, 195, 160))
     }
 
     /** In-game buttons: small options icon (top-centre) and the walk / run toggle (bottom-right). */
@@ -619,6 +713,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
                     Scr.OPTIONS -> drawOptions(c)
                     Scr.DIFFICULTY -> drawPicker(c)
                     Scr.MAIN -> drawMain(c)
+                    Scr.DRESSING -> drawDressing(c)
                     else -> {}
                 }
                 hits = cur; fovR = nextFov; fogR = nextFog; scrollR = nextScroll

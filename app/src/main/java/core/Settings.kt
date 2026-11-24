@@ -3,7 +3,7 @@ package com.backrooms.game
 import kotlin.math.*
 
 // ---------- Menu screens (shared by both clients), settings, saves ----------
-enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME, DIFFICULTY }
+enum class Scr { MAIN, SAVES, MULTI, OPTIONS, PAUSE, GAME, DIFFICULTY, DRESSING }
 
 /** Settings.renderer values: the frame drawn by Canvas, by OpenGL ES, or by Vulkan. */
 const val R_CANVAS = 0; const val R_GLES = 1; const val R_VULKAN = 2
