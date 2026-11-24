@@ -32,6 +32,11 @@ class SceneData {
     var texLevel = Int.MIN_VALUE
     /** Bumped whenever `tex` changed: a presenter re-uploads the textures when it differs from the one it last saw. */
     var texSerial = 0
+    /**
+     * Bumped every time [f] is fully rebuilt. Presenters can skip a redundant float upload only when this matches
+     * the last presented value *and* the camera did not move (rare); mainly a debug/telemetry hook for dirty tracking.
+     */
+    var dataSerial = 0
 
     fun put(i: Int, a: Double, b: Double, c: Double, d: Double) {
         val k = i * 4

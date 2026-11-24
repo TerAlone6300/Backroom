@@ -27,10 +27,11 @@ class VulkanPresenter private constructor(private var handle: Long, override val
 
     companion object {
         /** @throws IllegalStateException with the reason when Vulkan cannot be used on this device or surface. */
-        fun create(surface: Surface, w: Int, h: Int): VulkanPresenter {
-            val handle = VkNative.create(surface, w, h)
+        fun create(surface: Surface, w: Int, h: Int, preferVsync: Boolean = Settings.vsync): VulkanPresenter {
+            val handle = VkNative.create(surface, w, h, preferVsync)
             check(handle != 0L) { VkNative.lastError().ifEmpty { "Vulkan failed to start" } }
-            return VulkanPresenter(handle, "Vulkan (${VkNative.deviceName(handle)})")
+            val mode = if (preferVsync) "VSync" else "uncapped"
+            return VulkanPresenter(handle, "Vulkan (${VkNative.deviceName(handle)}, $mode)")
         }
     }
 }
