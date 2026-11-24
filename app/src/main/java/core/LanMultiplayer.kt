@@ -10,32 +10,23 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Properties
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val LAN_DISCOVERY_PORT = 47821
 private const val LAN_DISCOVERY_PREFIX = "BACKROOMS-LAN/1"
 
-/** A LAN server advertisement. Use [address] as the host and [port] to join with [Net]. */
 data class LanServerInfo(val name: String, val address: String, val port: Int) {
     val endpoint: String get() = "$address:$port"
 }
 
-/**
- * Starts a game server and broadcasts its presence to other Backrooms clients on the local network.
- * Pass port=0 to let the OS choose an available port, or provide a port in 1..65535.
- * The host is closeable so mobile clients can stop hosting when they leave the session.
- */
+/** LAN host using the same position and skin relay protocol as the dedicated desktop server. */
 class LanHost(port: Int = 0, private val name: String = "Backrooms world") : AutoCloseable {
     private val open = AtomicBoolean(true)
-    private val clients = ConcurrentHashMap<Int, PrintWriter>()
     private val server = ServerSocket(port)
-    private val seed = randomWorldSeed()
+    private val relay = SkinAwareRelay(randomWorldSeed())
     private var nextId = 1
     private val acceptThread: Thread
     private val advertiseThread: Thread
-
     val port: Int get() = server.localPort
 
     init {
@@ -48,24 +39,8 @@ class LanHost(port: Int = 0, private val name: String = "Backrooms world") : Aut
         while (open.get()) {
             val socket = try { server.accept() } catch (_: IOException) { break }
             val id = synchronized(this) { nextId++ }
-            Thread({ serveClient(socket, id) }, "backrooms-client-$id").apply { isDaemon = true; start() }
-        }
-    }
-
-    private fun serveClient(socket: Socket, id: Int) {
-        val writer = try { PrintWriter(socket.getOutputStream(), true) } catch (_: IOException) { socket.close(); return }
-        clients[id] = writer
-        writer.println("ID $id"); writer.println("SEED $seed")
-        try {
-            socket.getInputStream().bufferedReader().forEachLine { line ->
-                clients.forEach { (otherId, output) -> if (otherId != id) output.println(line) }
-            }
-        } catch (_: IOException) {
-            // Client disconnected.
-        } finally {
-            clients.remove(id)
-            clients.values.forEach { it.println("Q $id") }
-            try { socket.close() } catch (_: IOException) {}
+            Thread({ runCatching { relay.attach(socket, id) }.onFailure { runCatching { socket.close() } } }, "backrooms-client-$id")
+                .apply { isDaemon = true; start() }
         }
     }
 
@@ -74,13 +49,10 @@ class LanHost(port: Int = 0, private val name: String = "Backrooms world") : Aut
             try {
                 DatagramSocket().use { socket ->
                     socket.broadcast = true
-                    val payload = "$LAN_DISCOVERY_PREFIX\t${port}\t${name.replace('\t', ' ').replace('\n', ' ')}".toByteArray(Charsets.UTF_8)
-                    val packet = DatagramPacket(payload, payload.size, InetAddress.getByName("255.255.255.255"), LAN_DISCOVERY_PORT)
-                    socket.send(packet)
+                    val payload = "$LAN_DISCOVERY_PREFIX\t$port\t${name.replace('\t', ' ').replace('\n', ' ')}".toByteArray(Charsets.UTF_8)
+                    socket.send(DatagramPacket(payload, payload.size, InetAddress.getByName("255.255.255.255"), LAN_DISCOVERY_PORT))
                 }
-            } catch (_: Exception) {
-                // Discovery is best-effort; the game server remains usable via a manual address.
-            }
+            } catch (_: Exception) { /* Discovery is best-effort; direct addresses still work. */ }
             try { Thread.sleep(1000) } catch (_: InterruptedException) { return }
         }
     }
@@ -88,39 +60,29 @@ class LanHost(port: Int = 0, private val name: String = "Backrooms world") : Aut
     override fun close() {
         if (!open.compareAndSet(true, false)) return
         try { server.close() } catch (_: IOException) {}
-        clients.clear()
         acceptThread.interrupt(); advertiseThread.interrupt()
     }
 }
 
-/**
- * Listens briefly for LAN advertisements. Run this on a background thread; it returns the distinct
- * worlds heard during the scan. Manual server addresses remain available if broadcast is blocked by a router.
- */
 fun discoverLanServers(timeoutMillis: Int = 1800): List<LanServerInfo> {
     require(timeoutMillis > 0) { "Discovery timeout must be positive" }
     val found = LinkedHashMap<String, LanServerInfo>()
     val socket = DatagramSocket(null)
     try {
-        socket.reuseAddress = true
-        socket.broadcast = true
-        socket.bind(InetSocketAddress(LAN_DISCOVERY_PORT))
-        socket.soTimeout = minOf(timeoutMillis, 300)
+        socket.reuseAddress = true; socket.broadcast = true
+        socket.bind(InetSocketAddress(LAN_DISCOVERY_PORT)); socket.soTimeout = minOf(timeoutMillis, 300)
         val deadline = System.currentTimeMillis() + timeoutMillis
         while (System.currentTimeMillis() < deadline) {
-            val bytes = ByteArray(1024)
-            val packet = DatagramPacket(bytes, bytes.size)
+            val bytes = ByteArray(1024); val packet = DatagramPacket(bytes, bytes.size)
             try {
                 socket.receive(packet)
-                val parts = String(packet.data, packet.offset, packet.length, Charsets.UTF_8).split('\t', limit = 3)
-                if (parts.size == 3 && parts[0] == LAN_DISCOVERY_PREFIX) {
-                    val port = parts[1].toIntOrNull()?.takeIf { it in 1..65535 } ?: continue
-                    val info = LanServerInfo(parts[2], packet.address.hostAddress ?: continue, port)
+                val fields = String(packet.data, packet.offset, packet.length, Charsets.UTF_8).split('\t', limit = 3)
+                if (fields.size == 3 && fields[0] == LAN_DISCOVERY_PREFIX) {
+                    val port = fields[1].toIntOrNull()?.takeIf { it in 1..65535 } ?: continue
+                    val info = LanServerInfo(fields[2], packet.address.hostAddress ?: continue, port)
                     found[info.endpoint] = info
                 }
-            } catch (_: java.net.SocketTimeoutException) {
-                // Check the deadline again.
-            }
+            } catch (_: java.net.SocketTimeoutException) { /* Poll until deadline. */ }
         }
     } finally { socket.close() }
     return found.values.toList()
@@ -142,42 +104,27 @@ class LanServerBook(private val file: java.io.File) {
 
     @Synchronized fun add(server: LanServerInfo) {
         require(server.address.isNotBlank() && server.port in 1..65535)
-        val entries = (list().filterNot { it.address == server.address && it.port == server.port } + server).takeLast(100)
-        file.parentFile?.mkdirs()
-        val p = Properties().apply {
-            setProperty("count", entries.size.toString())
-            entries.forEachIndexed { i, item ->
-                setProperty("server.$i.name", item.name)
-                setProperty("server.$i.host", item.address)
-                setProperty("server.$i.port", item.port.toString())
-            }
-        }
-        val tmp = java.io.File(file.path + ".tmp")
-        tmp.outputStream().use { p.store(it, "Backrooms multiplayer servers") }
-        if (!tmp.renameTo(file)) { file.delete(); check(tmp.renameTo(file)) { "Unable to save multiplayer server list" } }
+        write((list().filterNot { it.address == server.address && it.port == server.port } + server).takeLast(100))
     }
 
-    @Synchronized fun remove(server: LanServerInfo) {
-        val entries = list().filterNot { it.address == server.address && it.port == server.port }
+    @Synchronized fun remove(server: LanServerInfo) = write(list().filterNot { it.address == server.address && it.port == server.port })
+
+    private fun write(entries: List<LanServerInfo>) {
         file.parentFile?.mkdirs()
-        val p = Properties().apply {
+        val properties = Properties().apply {
             setProperty("count", entries.size.toString())
             entries.forEachIndexed { i, item ->
-                setProperty("server.$i.name", item.name)
-                setProperty("server.$i.host", item.address)
-                setProperty("server.$i.port", item.port.toString())
+                setProperty("server.$i.name", item.name); setProperty("server.$i.host", item.address); setProperty("server.$i.port", item.port.toString())
             }
         }
         val tmp = java.io.File(file.path + ".tmp")
-        tmp.outputStream().use { p.store(it, "Backrooms multiplayer servers") }
-        if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        tmp.outputStream().use { properties.store(it, "Backrooms multiplayer servers") }
+        if (!tmp.renameTo(file)) { file.delete(); check(tmp.renameTo(file)) { "Unable to save multiplayer server list" } }
     }
 }
 
-/** Parse an IPv4/hostname endpoint, defaulting to the game's standard port. */
 fun parseServerEndpoint(value: String): LanServerInfo? {
-    val raw = value.trim()
-    if (raw.isEmpty()) return null
+    val raw = value.trim(); if (raw.isEmpty()) return null
     val split = raw.lastIndexOf(':')
     val host = if (split > 0 && raw.indexOf(':') == split) raw.substring(0, split) else raw
     val port = if (host.length < raw.length) raw.substring(split + 1).toIntOrNull() ?: return null else PORT
