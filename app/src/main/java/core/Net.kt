@@ -66,7 +66,10 @@ class Net(private val host: String, private val port: Int = PORT) {
                         "P" -> if (p.size == 5) {
                             val playerId = p[1].toIntOrNull(); val x = p[2].toDoubleOrNull(); val y = p[3].toDoubleOrNull(); val lv = p[4].toIntOrNull()
                             if (playerId != null && x != null && y != null && lv != null && x.isFinite() && y.isFinite())
-                                others[playerId] = doubleArrayOf(x, y, lv.toDouble())
+                                others[playerId] = others[playerId].let { prev -> // [x, y, level, id, yaw]; the protocol carries no facing, so face the direction of travel
+                                    val yaw = if (prev != null && prev.size > 4 && Math.hypot(x - prev[0], y - prev[1]) > 0.02) Math.atan2(y - prev[1], x - prev[0]) else if (prev != null && prev.size > 4) prev[4] else 0.0
+                                    doubleArrayOf(x, y, lv.toDouble(), playerId.toDouble(), yaw)
+                                }
                         }
                         "Q" -> p.getOrNull(1)?.toIntOrNull()?.let { others.remove(it); playerSkins.remove(it); pendingSkins.remove(it) }
                         "SKIN_DEFAULT" -> p.getOrNull(1)?.toIntOrNull()?.let { playerSkins[it] = RemotePlayerSkin(isDefault = true); pendingSkins.remove(it) }

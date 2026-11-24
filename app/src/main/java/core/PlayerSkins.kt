@@ -155,6 +155,9 @@ object PlayerSkinRenderer {
                             val bottom: Double, val width: Double, val depth: Double, val height: Double)
     private data class Vertex(val x: Double, val y: Double, val depth: Double, val u: Double, val v: Double)
 
+    /** Native height of the block figure (top of the head); [draw] scales it to the requested world height. */
+    private const val MODEL_HEIGHT = 1.52
+
     private val parts = listOf(
         Part(PlayerSkinLayout.rightLeg, PlayerSkinLayout.rightLegOverlay, -0.13, 0.02, 0.0, 0.12, 0.12, 0.76),
         Part(PlayerSkinLayout.leftLeg, PlayerSkinLayout.leftLegOverlay, 0.01, 0.02, 0.0, 0.12, 0.12, 0.76),
@@ -173,7 +176,7 @@ object PlayerSkinRenderer {
         pixels: IntArray, screenWidth: Int, screenHeight: Int, wallDepth: DoubleArray,
         skin: SkinTexture, worldX: Double, worldY: Double, playerYaw: Double,
         cameraX: Double, cameraY: Double, cameraYaw: Double, fovRadians: Double,
-        horizon: Int, worldHeight: Double = 1.8, distanceLight: (Double) -> Double = { 1.0 }
+        horizon: Int, worldHeight: Double = 1.8, distanceLight: (Double) -> Double = { 1.0 }, verticalScale: Double = 1.0
     ) {
         require(screenWidth > 0 && screenHeight > 0 && pixels.size == screenWidth * screenHeight)
         require(wallDepth.size == screenWidth && fovRadians in 0.0..Math.PI && fovRadians > 0.0 && worldHeight > 0.0)
@@ -181,30 +184,31 @@ object PlayerSkinRenderer {
         val forwardX = kotlin.math.cos(playerYaw); val forwardY = kotlin.math.sin(playerYaw)
         val cosCamera = kotlin.math.cos(cameraYaw); val sinCamera = kotlin.math.sin(cameraYaw)
         val focal = screenWidth / (2.0 * kotlin.math.tan(fovRadians / 2.0))
+        val scale = worldHeight / MODEL_HEIGHT
         for (part in parts) {
             drawBox(pixels, screenWidth, screenHeight, wallDepth, skin, part, false, worldX, worldY, rightX, rightY,
-                forwardX, forwardY, cameraX, cameraY, cosCamera, sinCamera, focal, horizon, worldHeight, distanceLight)
+                forwardX, forwardY, cameraX, cameraY, cosCamera, sinCamera, focal, horizon, scale, verticalScale, distanceLight)
             drawBox(pixels, screenWidth, screenHeight, wallDepth, skin, part, true, worldX, worldY, rightX, rightY,
-                forwardX, forwardY, cameraX, cameraY, cosCamera, sinCamera, focal, horizon, worldHeight, distanceLight)
+                forwardX, forwardY, cameraX, cameraY, cosCamera, sinCamera, focal, horizon, scale, verticalScale, distanceLight)
         }
     }
 
     private fun drawBox(pixels: IntArray, sw: Int, sh: Int, wallDepth: DoubleArray, skin: SkinTexture, part: Part,
                        overlay: Boolean, worldX: Double, worldY: Double, rightX: Double, rightY: Double,
                        forwardX: Double, forwardY: Double, cameraX: Double, cameraY: Double, cosCamera: Double,
-                       sinCamera: Double, focal: Double, horizon: Int, worldHeight: Double,
+                       sinCamera: Double, focal: Double, horizon: Int, scale: Double, vScale: Double,
                        light: (Double) -> Double) {
         val expand = if (overlay) 0.012 else 0.0
         val x0 = part.x - expand; val x1 = part.x + part.width + expand
         val z0 = part.z - expand; val z1 = part.z + part.depth + expand
         val y0 = part.bottom - expand; val y1 = part.bottom + part.height + expand
         fun project(px: Double, py: Double, pz: Double): Vertex? {
-            val dx = worldX + rightX * px + forwardX * pz - cameraX
-            val dy = worldY + rightY * px + forwardY * pz - cameraY
+            val dx = worldX + (rightX * px + forwardX * pz) * scale - cameraX
+            val dy = worldY + (rightY * px + forwardY * pz) * scale - cameraY
             val depth = dx * cosCamera + dy * sinCamera
             if (depth <= 0.05) return null
             val side = -dx * sinCamera + dy * cosCamera
-            return Vertex(sw / 2.0 + side * focal / depth, horizon - py * (sh / worldHeight) * focal / depth, depth, 0.0, 0.0)
+            return Vertex(sw / 2.0 + side * focal / depth, horizon - py * scale * vScale * focal / depth, depth, 0.0, 0.0)
         }
         val corners = arrayOf(
             project(x0, y0, z1), project(x1, y0, z1), project(x1, y1, z1), project(x0, y1, z1),

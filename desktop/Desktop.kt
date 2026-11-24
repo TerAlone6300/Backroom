@@ -500,7 +500,7 @@ fun main(argv: Array<String>) {
                 g.update(dt, f, s, turn, KeyEvent.VK_SHIFT in keys)
                 if (n != null && now / 1_000_000 - lastSend > 50) { n.send(g.x, g.y, g.level); lastSend = now / 1_000_000 }
             }
-            cur.get().let { it.r.render(it.px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME) }
+            cur.get().let { it.r.render(it.px, g, t, n?.others?.values ?: emptyList(), scr == Scr.GAME, n?.playerSkins ?: emptyMap()) }
         }
         panel.repaint()
         Thread.sleep(8)

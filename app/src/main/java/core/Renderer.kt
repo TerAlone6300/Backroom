@@ -288,7 +288,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         for (o in others) if (o.size > 2 && o[2].toInt() == lv) {
             // isolated levels hide other players, even right next to you (except inside the Manila Room)
             if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
-            items.add(doubleArrayOf(o[0], o[1], 0.0))
+            items.add(if (o.size > 4) doubleArrayOf(o[0], o[1], 0.0, 3.0, o[3], o[4]) else doubleArrayOf(o[0], o[1], 0.0)) // 3.0 = textured player model: [x, y, 0, 3, id, yaw]
         }
         ow?.extraSprites(x, y, items)
         for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, e.type.toDouble()))
@@ -298,7 +298,10 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         return items
     }
 
-    fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
+    /** Skin used for players whose own skin has not arrived (or is the default one). Platforms may replace it, e.g. with PlayerSkinAssets.load(...). */
+    @Volatile var defaultSkin: SkinTexture = DefaultPlayerSkin.texture
+
+    fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true, skins: Map<Int, RemotePlayerSkin> = emptyMap()) {
         val lv = g.level; val d = levelDef(lv); val ts = texOf(lv); val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
         spec = levelSpec(lv); zonesOn = spec.zones; for (b in bands) b.zx = Int.MIN_VALUE
@@ -392,6 +395,12 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
+            if (type == 0 && o.size > 5 && o[3] == 3.0) { // another player: textured block model, feet on the floor, hidden behind walls by the z-buffer
+                val tex = skins[o[4].toInt()]?.texture ?: defaultSkin
+                PlayerSkinRenderer.draw(px, W, H, zb, tex, o[0], o[1], o[5], x, y, a, Math.toRadians(Settings.fov.toDouble()),
+                    hz + (full * ch).toInt(), 0.9, { dd -> 0.55 + 0.45 / (1 + dd * 0.3) }, verticalScale = H * vs / (W / (2.0 * pl)))
+                continue
+            }
             val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; else -> 0.9 }
             val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)

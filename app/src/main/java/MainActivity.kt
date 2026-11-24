@@ -574,9 +574,9 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         val kind = Settings.renderer
         if (gpu.usable(kind)) {
             if (r.buildScene(g, t, others, hud, scene)) { if (gpu.presentScene(scene, r.W, r.H, kind)) return true }
-            else { r.render(px, g, t, others, hud); if (gpu.present(px, r.W, r.H, kind)) return true }
+            else { r.render(px, g, t, others, hud, net?.playerSkins ?: emptyMap()); if (gpu.present(px, r.W, r.H, kind)) return true }
         }
-        r.render(px, g, t, others, hud)
+        r.render(px, g, t, others, hud, net?.playerSkins ?: emptyMap())
         bmp.setPixels(px, 0, r.W, 0, 0, r.W, r.H)
         return false
     }
