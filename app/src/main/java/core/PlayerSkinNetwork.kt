@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream
 import java.io.PrintWriter
 import java.net.Socket
 import java.util.concurrent.ConcurrentHashMap
-import java.util.zip.CRC32
 
 /** Skin state synchronized between network clients. Custom PNG bytes are cached by the relay server. */
 data class RemotePlayerSkin(val isDefault: Boolean, val texture: SkinTexture? = null, val png: ByteArray? = null)
@@ -16,13 +15,16 @@ internal class SkinAwareRelay(private val seed: Int) {
 
     private val peers = ConcurrentHashMap<Int, Peer>()
     private val skins = ConcurrentHashMap<Int, RemotePlayerSkin>()
+    private val stateLock = Any()
 
     fun attach(socket: Socket, id: Int) {
         val peer = Peer(id, socket, PrintWriter(socket.getOutputStream(), true))
-        peers[id] = peer
-        send(peer, "ID $id"); send(peer, "SEED $seed")
-        // Register before replay so concurrent skin updates are either broadcast to this peer or included here.
-        skins.toSortedMap().forEach { (playerId, state) -> sendSkin(peer, playerId, state) }
+        synchronized(stateLock) {
+            peers[id] = peer
+            send(peer, "ID $id"); send(peer, "SEED $seed")
+            // A late joiner gets a snapshot of every currently connected player's skin.
+            skins.toSortedMap().forEach { (playerId, state) -> sendSkin(peer, playerId, state) }
+        }
         Thread({ serve(peer) }, "backrooms-client-$id").apply { isDaemon = true; start() }
     }
 
@@ -33,7 +35,8 @@ internal class SkinAwareRelay(private val seed: Int) {
             while (true) {
                 val line = reader.readLine() ?: break
                 if (line.length > SkinWire.MAX_LINE_LENGTH) break
-                val p = line.split(' ', limit = 4)
+                // Position packets have five fields; skin chunks have four (the last field is base64).
+                val p = line.split(' ', limit = 5)
                 when (p.firstOrNull()) {
                     "P" -> if (p.size == 5 && p[1].toIntOrNull() == peer.id) {
                         val x = p[2].toDoubleOrNull(); val y = p[3].toDoubleOrNull(); val level = p[4].toIntOrNull()
@@ -43,8 +46,10 @@ internal class SkinAwareRelay(private val seed: Int) {
                     "SKIN_DEFAULT" -> if (p.size == 2 && p[1].toIntOrNull() == peer.id) {
                         upload = null
                         val state = RemotePlayerSkin(isDefault = true)
-                        skins[peer.id] = state
-                        broadcastSkin(peer.id, state, exceptId = peer.id)
+                        synchronized(stateLock) {
+                            skins[peer.id] = state
+                            broadcastSkin(peer.id, state, exceptId = peer.id)
+                        }
                     }
                     "SKIN_BEGIN" -> if (p.size == 3 && p[1].toIntOrNull() == peer.id) {
                         val size = p[2].toIntOrNull()
@@ -66,8 +71,10 @@ internal class SkinAwareRelay(private val seed: Int) {
                             val texture = runCatching { SkinTexture.fromPng(png) }.getOrNull()
                             if (texture != null) {
                                 val state = RemotePlayerSkin(isDefault = false, texture = texture, png = png)
-                                skins[peer.id] = state
-                                broadcastSkin(peer.id, state, exceptId = peer.id)
+                                synchronized(stateLock) {
+                                    skins[peer.id] = state
+                                    broadcastSkin(peer.id, state, exceptId = peer.id)
+                                }
                             }
                         }
                     }
@@ -77,9 +84,11 @@ internal class SkinAwareRelay(private val seed: Int) {
             // Client disconnected or sent a malformed packet; its pending upload is discarded.
         } finally {
             upload = null
-            peers.remove(peer.id, peer)
-            skins.remove(peer.id)
-            broadcast("Q ${peer.id}", peer.id)
+            synchronized(stateLock) {
+                peers.remove(peer.id, peer)
+                skins.remove(peer.id) // Release the cached custom PNG and texture immediately on leave.
+                broadcast("Q ${peer.id}", peer.id)
+            }
             runCatching { peer.socket.close() }
         }
     }
@@ -96,8 +105,7 @@ internal class SkinAwareRelay(private val seed: Int) {
         var offset = 0
         while (offset < png.size) {
             val end = minOf(offset + SkinWire.CHUNK_BYTES, png.size)
-            val encoded = SkinWire.encodeBase64(png, offset, end - offset)
-            send(peer, "SKIN_CHUNK $playerId ${sequence++} $encoded")
+            send(peer, "SKIN_CHUNK $playerId ${sequence++} ${SkinWire.encodeBase64(png, offset, end - offset)}")
             offset = end
         }
         send(peer, "SKIN_END $playerId")

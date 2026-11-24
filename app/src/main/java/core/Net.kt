@@ -55,7 +55,7 @@ class Net(private val host: String, private val port: Int = PORT) {
                 Thread { Thread.sleep(2000); if (seed == null) seed = LEGACY_SEED }.apply { isDaemon = true; start() }
                 s.getInputStream().bufferedReader(Charsets.UTF_8).forEachLine { line ->
                     if (line.length > SkinWire.MAX_LINE_LENGTH) throw IOException("Oversize multiplayer packet")
-                    val p = line.split(' ', limit = 4)
+                    val p = line.split(' ', limit = 5)
                     when (p.firstOrNull()) {
                         "ID" -> p.getOrNull(1)?.toIntOrNull()?.takeIf { it > 0 }?.let { playerId ->
                             id = playerId
@@ -94,8 +94,10 @@ class Net(private val host: String, private val port: Int = PORT) {
                 }
             } catch (_: Exception) {
                 // Connection loss is reflected in state; callers can keep using the fallback skin.
+            } finally {
+                state = 2
+                others.clear(); playerSkins.clear(); pendingSkins.clear()
             }
-            state = 2
         }.apply { isDaemon = true; start() }
     }
 
@@ -111,17 +113,23 @@ class Net(private val host: String, private val port: Int = PORT) {
         }
         val texture = runCatching { SkinTexture.fromPng(png) }.getOrNull() ?: return
         playerSkins[playerId] = RemotePlayerSkin(isDefault = false, texture = texture, png = png)
-        sendLine("SKIN_BEGIN $playerId ${png.size}")
-        var offset = 0; var sequence = 0
-        while (offset < png.size) {
-            val size = minOf(SkinWire.CHUNK_BYTES, png.size - offset)
-            sendLine("SKIN_CHUNK $playerId ${sequence++} ${SkinWire.encodeBase64(png, offset, size)}")
-            offset += size
+        synchronized(writeLock) {
+            val writer = out ?: return
+            writer.println("SKIN_BEGIN $playerId ${png.size}")
+            var offset = 0; var sequence = 0
+            while (offset < png.size) {
+                val size = minOf(SkinWire.CHUNK_BYTES, png.size - offset)
+                writer.println("SKIN_CHUNK $playerId ${sequence++} ${SkinWire.encodeBase64(png, offset, size)}")
+                offset += size
+            }
+            writer.println("SKIN_END $playerId")
         }
-        sendLine("SKIN_END $playerId")
     }
 
     private fun sendLine(line: String) { synchronized(writeLock) { out?.println(line) } }
     fun send(x: Double, y: Double, lv: Int) { if (id != 0) sendLine("P $id $x $y $lv") }
-    fun close() { try { sock?.close() } catch (_: IOException) {} }
+    fun close() {
+        try { sock?.close() } catch (_: IOException) {}
+        others.clear(); playerSkins.clear(); pendingSkins.clear()
+    }
 }
