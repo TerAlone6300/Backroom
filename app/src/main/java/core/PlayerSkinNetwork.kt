@@ -22,7 +22,6 @@ internal class SkinAwareRelay(private val seed: Int) {
         synchronized(stateLock) {
             peers[id] = peer
             send(peer, "ID $id"); send(peer, "SEED $seed")
-            // A late joiner gets a snapshot of every currently connected player's skin.
             skins.toSortedMap().forEach { (playerId, state) -> sendSkin(peer, playerId, state) }
         }
         Thread({ serve(peer) }, "backrooms-client-$id").apply { isDaemon = true; start() }
@@ -35,7 +34,6 @@ internal class SkinAwareRelay(private val seed: Int) {
             while (true) {
                 val line = reader.readLine() ?: break
                 if (line.length > SkinWire.MAX_LINE_LENGTH) break
-                // Position packets have five fields; skin chunks have four (the last field is base64).
                 val p = line.split(' ', limit = 5)
                 when (p.firstOrNull()) {
                     "P" -> if (p.size == 5 && p[1].toIntOrNull() == peer.id) {
@@ -46,10 +44,7 @@ internal class SkinAwareRelay(private val seed: Int) {
                     "SKIN_DEFAULT" -> if (p.size == 2 && p[1].toIntOrNull() == peer.id) {
                         upload = null
                         val state = RemotePlayerSkin(isDefault = true)
-                        synchronized(stateLock) {
-                            skins[peer.id] = state
-                            broadcastSkin(peer.id, state, exceptId = peer.id)
-                        }
+                        synchronized(stateLock) { skins[peer.id] = state; broadcastSkin(peer.id, state, exceptId = peer.id) }
                     }
                     "SKIN_BEGIN" -> if (p.size == 3 && p[1].toIntOrNull() == peer.id) {
                         val size = p[2].toIntOrNull()
@@ -58,8 +53,7 @@ internal class SkinAwareRelay(private val seed: Int) {
                     "SKIN_CHUNK" -> {
                         val current = upload
                         if (p.size == 4 && current != null && p[1].toIntOrNull() == peer.id && current.playerId == peer.id) {
-                            val seq = p[2].toIntOrNull()
-                            val chunk = SkinWire.decodeBase64(p[3])
+                            val seq = p[2].toIntOrNull(); val chunk = SkinWire.decodeBase64(p[3])
                             if (seq != current.nextChunk || chunk == null || current.bytes.size().toLong() + chunk.size > current.expectedBytes) upload = null
                             else { current.bytes.write(chunk); current.nextChunk++ }
                         } else upload = null
@@ -71,38 +65,30 @@ internal class SkinAwareRelay(private val seed: Int) {
                             val texture = runCatching { SkinTexture.fromPng(png) }.getOrNull()
                             if (texture != null) {
                                 val state = RemotePlayerSkin(isDefault = false, texture = texture, png = png)
-                                synchronized(stateLock) {
-                                    skins[peer.id] = state
-                                    broadcastSkin(peer.id, state, exceptId = peer.id)
-                                }
+                                synchronized(stateLock) { skins[peer.id] = state; broadcastSkin(peer.id, state, exceptId = peer.id) }
                             }
                         }
                     }
                 }
             }
-        } catch (_: Exception) {
-            // Client disconnected or sent a malformed packet; its pending upload is discarded.
-        } finally {
+        } catch (_: Exception) {}
+        finally {
             upload = null
             synchronized(stateLock) {
                 peers.remove(peer.id, peer)
-                skins.remove(peer.id) // Release the cached custom PNG and texture immediately on leave.
+                skins.remove(peer.id)
                 broadcast("Q ${peer.id}", peer.id)
             }
             runCatching { peer.socket.close() }
         }
     }
 
-    private fun broadcastSkin(playerId: Int, state: RemotePlayerSkin, exceptId: Int) {
-        peers.values.forEach { if (it.id != exceptId) sendSkin(it, playerId, state) }
-    }
-
+    private fun broadcastSkin(playerId: Int, state: RemotePlayerSkin, exceptId: Int) = peers.values.forEach { if (it.id != exceptId) sendSkin(it, playerId, state) }
     private fun sendSkin(peer: Peer, playerId: Int, state: RemotePlayerSkin) {
         val png = state.png
         if (state.isDefault || png == null) { send(peer, "SKIN_DEFAULT $playerId"); return }
         send(peer, "SKIN_BEGIN $playerId ${png.size}")
-        var sequence = 0
-        var offset = 0
+        var sequence = 0; var offset = 0
         while (offset < png.size) {
             val end = minOf(offset + SkinWire.CHUNK_BYTES, png.size)
             send(peer, "SKIN_CHUNK $playerId ${sequence++} ${SkinWire.encodeBase64(png, offset, end - offset)}")
@@ -115,7 +101,6 @@ internal class SkinAwareRelay(private val seed: Int) {
     private fun send(peer: Peer, line: String) = synchronized(peer.lock) { peer.writer.println(line) }
 }
 
-/** Bounded, platform-independent Base64 for Android versions predating java.util.Base64. */
 internal object SkinWire {
     const val MAX_SKIN_BYTES = 8 * 1024 * 1024
     const val CHUNK_BYTES = 12 * 1024
@@ -142,8 +127,7 @@ internal object SkinWire {
         if (value.isEmpty() || value.length % 4 != 0 || value.length > MAX_LINE_LENGTH) return null
         val padding = if (value.endsWith("==")) 2 else if (value.endsWith('=')) 1 else 0
         val result = ByteArray(value.length / 4 * 3 - padding)
-        var out = 0
-        var i = 0
+        var out = 0; var i = 0
         while (i < value.length) {
             val final = i + 4 == value.length
             val c0 = value[i].code; val c1 = value[i + 1].code; val c2 = value[i + 2].code; val c3 = value[i + 3].code
@@ -152,7 +136,6 @@ internal object SkinWire {
             val c = if (c2 == '='.code && final && padding == 2) 0 else if (c2 < decode.size) decode[c2] else -1
             val d = if (c3 == '='.code && final && padding > 0) 0 else if (c3 < decode.size) decode[c3] else -1
             if (c < 0 || d < 0 || (!final && (c2 == '='.code || c3 == '='.code))) return null
-            if (c2 == '='.code && (b and 15) != 0 || c3 == '='.code && c2 != '='.code && (c and 3) != 0) return null
             if (out < result.size) result[out++] = ((a shl 2) or (b ushr 4)).toByte()
             if (out < result.size) result[out++] = ((b shl 4) or (c ushr 2)).toByte()
             if (out < result.size) result[out++] = ((c shl 6) or d).toByte()
