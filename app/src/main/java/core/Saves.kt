@@ -50,6 +50,7 @@ object Store {
                 p.getProperty("frame")?.toIntOrNull()?.let { Settings.putFrame(it) }
                 p.getProperty("fpsLimit")?.toIntOrNull()?.let { Settings.putFpsLimit(it) }
                 p.getProperty("vsync")?.let { Settings.putVsync(it == "1" || it.equals("true", ignoreCase = true)) }
+                p.getProperty("quality")?.toIntOrNull()?.let { Settings.putQuality(it) }
                 val legacy = p.getProperty("ids") != "2"
                 p.getProperty("found")?.split(",")?.forEach { s -> s.trim().toIntOrNull()?.let { Progress.load(if (legacy) legacyId(it) else it) } }
             }
@@ -62,6 +63,7 @@ object Store {
             put(File(d, "profile.properties"), java.util.Properties().apply {
                 setProperty("fov", Settings.fov.toString()); setProperty("fog", Settings.fog.toString()); setProperty("renderer", Settings.renderer.toString()); setProperty("frame", Settings.frameH.toString())
                 setProperty("fpsLimit", Settings.fpsLimit.toString()); setProperty("vsync", if (Settings.vsync) "1" else "0")
+                setProperty("quality", Settings.quality.toString())
                 setProperty("ids", "2"); setProperty("found", Progress.all().joinToString(","))
             })
         }

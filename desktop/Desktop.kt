@@ -335,13 +335,24 @@ fun main(argv: Array<String>) {
                 btn(g2, Rectangle(tl, (hh * 0.635).toInt(), bw, hh / 18), "ON", Settings.vsync, ac) { Settings.putVsync(true); Store.saveProfile() }
                 btn(g2, Rectangle(tl + bw + 6, (hh * 0.635).toInt(), bw, hh / 18), "OFF", !Settings.vsync, ac) { Settings.putVsync(false); Store.saveProfile() }
             }
-            txt(g2, "FPS LIMIT  ·  ${Settings.fpsLimitName()}", tl, (hh * 0.72).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            txt(g2, "QUALITY  ·  ${Settings.QUALITY_NAMES[Settings.quality].uppercase()}", tl, (hh * 0.70).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
+            run {
+                val qn = Settings.QUALITY_NAMES.size
+                val qw = (tr - tl - (qn - 1) * 6) / qn; var qx = tl
+                for (qi in 0 until qn) {
+                    btn(g2, Rectangle(qx, (hh * 0.715).toInt(), qw, hh / 22), Settings.QUALITY_NAMES[qi].uppercase(), Settings.quality == qi, ac) {
+                        Settings.putQuality(qi); Store.saveProfile()
+                    }
+                    qx += qw + 6
+                }
+            }
+            txt(g2, "FPS LIMIT  ·  ${Settings.fpsLimitName()}", tl, (hh * 0.78).toInt(), spaced(Font("SansSerif", Font.BOLD, hh / 44), 0.25f), Color(220, 212, 185), false)
             run {
                 val caps = listOf(30, 60, 90, 120, 144, 240, 0)
                 val cw = (tr - tl - (caps.size - 1) * 4) / caps.size; var cx0 = tl
                 for (cap in caps) {
                     val lab = if (cap == 0) "ULT" else "$cap"
-                    btn(g2, Rectangle(cx0, (hh * 0.735).toInt(), cw, hh / 18), lab, Settings.fpsLimit == cap, ac) { Settings.putFpsLimit(cap); Store.saveProfile() }
+                    btn(g2, Rectangle(cx0, (hh * 0.795).toInt(), cw, hh / 22), lab, Settings.fpsLimit == cap, ac) { Settings.putFpsLimit(cap); Store.saveProfile() }
                     cx0 += cw + 4
                 }
             }

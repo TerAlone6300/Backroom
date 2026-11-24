@@ -40,6 +40,24 @@ object Settings {
     @Volatile var vsync = true
     fun putVsync(on: Boolean) { vsync = on }
 
+    /**
+     * Render quality (Sodium/Iris-style cost knobs). Affects GPU path and Canvas:
+     * 0 = Low (fewer DDA steps, fewer sprites, no film grain / water ripple / glitch rows),
+     * 1 = Medium (balanced), 2 = High (full fidelity, default).
+     */
+    const val Q_LOW = 0; const val Q_MED = 1; const val Q_HIGH = 2
+    val QUALITY_NAMES = listOf("Low", "Medium", "High")
+    @Volatile var quality = Q_HIGH
+    fun putQuality(q: Int) { quality = q.coerceIn(Q_LOW, Q_HIGH) }
+    /** Max DDA steps for wall rays. */
+    fun ddaSteps() = when (quality) { Q_LOW -> 32; Q_MED -> 48; else -> 64 }
+    /** Max sprites written into the scene (far ones drop first). */
+    fun maxSprites() = when (quality) { Q_LOW -> 24; Q_MED -> 40; else -> Scene.MAX_SPR }
+    /** Max glitch/HUD shift rows. */
+    fun maxGlitch() = when (quality) { Q_LOW -> 0; Q_MED -> 24; else -> Scene.MAX_GLI }
+    fun grainOn() = quality >= Q_HIGH
+    fun waterDetail() = quality >= Q_MED
+
     @Volatile var diff = 1   // index into DIFFS: the difficulty of the game being played. Chosen when a game starts and kept in its save, never in the profile
     val FOG_PRESETS = listOf(0 to "Off", 50 to "Light", 100 to "Default")
     val fogScale get() = fog / 100.0

@@ -435,34 +435,42 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         }
         small(c, gpu.statusLine(Settings.renderer), tl, ry + 36 * dp, 9f, note, Paint.Align.LEFT)
         // Frame size
-        small(c, "FRAME SIZE  ·  ${Settings.frameH}p", tl, h * 0.38f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
-        val n = Settings.FRAME_HEIGHTS.size; val fw = (tr - tl - (n - 1) * 5 * dp) / n; val fy = h * 0.405f; var fx = tl
+        small(c, "FRAME SIZE  ·  ${Settings.frameH}p", tl, h * 0.34f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val n = Settings.FRAME_HEIGHTS.size; val fw = (tr - tl - (n - 1) * 5 * dp) / n; val fy = h * 0.365f; var fx = tl
         for (f in Settings.FRAME_HEIGHTS) {
-            btn(c, RectF(fx, fy, fx + fw, fy + 24 * dp), "${f}p", Settings.frameH == f, a) { Settings.putFrame(f); Store.saveProfile() }
+            btn(c, RectF(fx, fy, fx + fw, fy + 22 * dp), "${f}p", Settings.frameH == f, a) { Settings.putFrame(f); Store.saveProfile() }
             fx += fw + 5 * dp
         }
+        // Quality (Sodium-style cost knobs)
+        small(c, "QUALITY  ·  ${Settings.QUALITY_NAMES[Settings.quality].uppercase()}", tl, h * 0.46f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val qn = Settings.QUALITY_NAMES.size; val qw = (tr - tl - (qn - 1) * 6 * dp) / qn; val qy = h * 0.485f; var qx = tl
+        for (qi in 0 until qn) {
+            btn(c, RectF(qx, qy, qx + qw, qy + 22 * dp), Settings.QUALITY_NAMES[qi].uppercase(), Settings.quality == qi, a) {
+                Settings.putQuality(qi); Store.saveProfile()
+            }
+            qx += qw + 6 * dp
+        }
+        small(c, "Low = fewer rays/sprites, no grain. High = full fidelity.", tl, qy + 32 * dp, 9f, note, Paint.Align.LEFT)
         // VSync
-        small(c, "VSYNC", tl, h * 0.52f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
-        val vy = h * 0.545f; val vw = (tr - tl - 6 * dp) / 2f
-        btn(c, RectF(tl, vy, tl + vw, vy + 24 * dp), "ON", Settings.vsync, a) {
+        small(c, "VSYNC", tl, h * 0.58f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        val vy = h * 0.605f; val vw = (tr - tl - 6 * dp) / 2f
+        btn(c, RectF(tl, vy, tl + vw, vy + 22 * dp), "ON", Settings.vsync, a) {
             Settings.putVsync(true); Store.saveProfile()
         }
-        btn(c, RectF(tl + vw + 6 * dp, vy, tr, vy + 24 * dp), "OFF", !Settings.vsync, a) {
+        btn(c, RectF(tl + vw + 6 * dp, vy, tr, vy + 22 * dp), "OFF", !Settings.vsync, a) {
             Settings.putVsync(false); Store.saveProfile()
         }
-        small(c, if (Settings.vsync) "Locked to display refresh (no tearing)." else "Uncapped present (MAILBOX/IMMEDIATE when available).", tl, vy + 36 * dp, 9f, note, Paint.Align.LEFT)
         // FPS limit
-        small(c, "FPS LIMIT  ·  ${Settings.fpsLimitName()}", tl, h * 0.68f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
+        small(c, "FPS LIMIT  ·  ${Settings.fpsLimitName()}", tl, h * 0.70f, 10.5f, label, Paint.Align.LEFT, 0.25f, true)
         val caps = listOf(30, 60, 90, 120, 144, 240, 0)  // 0 = Ultimate
-        val cn = caps.size; val cw = (tr - tl - (cn - 1) * 4 * dp) / cn; val cy = h * 0.705f; var cx = tl
+        val cn = caps.size; val cw = (tr - tl - (cn - 1) * 4 * dp) / cn; val cy = h * 0.725f; var cx = tl
         for (cap in caps) {
             val lab = if (cap == 0) "ULT" else "$cap"
-            btn(c, RectF(cx, cy, cx + cw, cy + 24 * dp), lab, Settings.fpsLimit == cap, a) {
+            btn(c, RectF(cx, cy, cx + cw, cy + 22 * dp), lab, Settings.fpsLimit == cap, a) {
                 Settings.putFpsLimit(cap); Store.saveProfile()
             }
             cx += cw + 4 * dp
         }
-        small(c, "20–290 or Ultimate (no cap). Applies on top of VSync.", tl, cy + 36 * dp, 9f, note, Paint.Align.LEFT)
         btn(c, RectF(w / 2 - 70 * dp, h - 48 * dp, w / 2 + 70 * dp, h - 12 * dp), "BACK", false, a) { optPage = 0 }
     }
 
