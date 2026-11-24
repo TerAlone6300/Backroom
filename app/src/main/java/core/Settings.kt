@@ -19,6 +19,45 @@ object Settings {
     @Volatile var frameH = FRAME_H
     val frameW get() = frameH * 16 / 9
     fun putFrame(h: Int) { frameH = FRAME_HEIGHTS.minByOrNull { abs(it - h) } ?: FRAME_H }
+
+    /** Cap the game loop at this many frames per second. 0 = Ultimate (no limit). Clamped to 20..290 when non-zero. */
+    const val FPS_MIN = 20; const val FPS_MAX = 290
+    @Volatile var fpsLimit = 0  // 0 = Ultimate
+    /** Sticky points on the FPS slider (plus the continuous range). */
+    val FPS_PRESETS = listOf(30, 60, 90, 120, 144, 240, 290)
+    fun putFpsLimit(v: Int) { fpsLimit = if (v <= 0) 0 else v.coerceIn(FPS_MIN, FPS_MAX) }
+    fun fpsLimitName(v: Int = fpsLimit) = if (v <= 0) "Ultimate" else "$v"
+    /** Slider 0..1: left = 20, near right = 290, far right = Ultimate. */
+    fun fpsLimitFrac(v: Int = fpsLimit): Double =
+        if (v <= 0) 1.0 else ((v - FPS_MIN).toDouble() / (FPS_MAX - FPS_MIN)).coerceIn(0.0, 0.97)
+    fun fpsLimitFromFrac(t: Double): Int {
+        if (t >= 0.985) return 0  // Ultimate
+        val raw = (FPS_MIN + t.coerceIn(0.0, 1.0) * (FPS_MAX - FPS_MIN)).roundToInt()
+        return FPS_PRESETS.firstOrNull { abs(it - raw) <= 4 } ?: raw.coerceIn(FPS_MIN, FPS_MAX)
+    }
+
+    /** When true, prefer vsync (FIFO / eglSwapInterval 1). When false, prefer uncapped present (MAILBOX/IMMEDIATE / interval 0). */
+    @Volatile var vsync = true
+    fun putVsync(on: Boolean) { vsync = on }
+
+    /**
+     * Render quality (Sodium/Iris-style cost knobs). Affects GPU path and Canvas:
+     * 0 = Low (fewer DDA steps, fewer sprites, no film grain / water ripple / glitch rows),
+     * 1 = Medium (balanced), 2 = High (full fidelity, default).
+     */
+    const val Q_LOW = 0; const val Q_MED = 1; const val Q_HIGH = 2
+    val QUALITY_NAMES = listOf("Low", "Medium", "High")
+    @Volatile var quality = Q_HIGH
+    fun putQuality(q: Int) { quality = q.coerceIn(Q_LOW, Q_HIGH) }
+    /** Max DDA steps for wall rays. */
+    fun ddaSteps() = when (quality) { Q_LOW -> 32; Q_MED -> 48; else -> 64 }
+    /** Max sprites written into the scene (far ones drop first). */
+    fun maxSprites() = when (quality) { Q_LOW -> 24; Q_MED -> 40; else -> Scene.MAX_SPR }
+    /** Max glitch/HUD shift rows. */
+    fun maxGlitch() = when (quality) { Q_LOW -> 0; Q_MED -> 24; else -> Scene.MAX_GLI }
+    fun grainOn() = quality >= Q_HIGH
+    fun waterDetail() = quality >= Q_MED
+
     @Volatile var diff = 1   // index into DIFFS: the difficulty of the game being played. Chosen when a game starts and kept in its save, never in the profile
     val FOG_PRESETS = listOf(0 to "Off", 50 to "Light", 100 to "Default")
     val fogScale get() = fog / 100.0

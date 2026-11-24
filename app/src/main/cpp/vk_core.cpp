@@ -45,9 +45,10 @@ bool VkFramePresenter::fail(const char* what, VkResult r) {
 // ---------------------------------------------------------------------------------------------------------------
 
 bool VkFramePresenter::init(const std::vector<const char*>& platformExts, SurfaceFactory factory, uint32_t frameW,
-                            uint32_t frameH) {
+                            uint32_t frameH, bool preferVsync) {
     fw_ = frameW;
     fh_ = frameH;
+    preferVsync_ = preferVsync;
     factory_ = std::move(factory);
     if (!loadLibrary() || !createInstance(platformExts)) return false;
 
@@ -471,7 +472,32 @@ bool VkFramePresenter::createSwapchain(uint32_t viewW, uint32_t viewH) {
     for (VkCompositeAlphaFlagBitsKHR a : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR}) {
         if (caps.supportedCompositeAlpha & a) { sci.compositeAlpha = a; break; }
     }
-    sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;  // the only mode every implementation must offer; also the vsync pacing
+    // Present mode from Settings.vsync (preferVsync_):
+    //   vsync on  → FIFO (display sync, required by the spec)
+    //   vsync off → MAILBOX (triple-buffer, no tear) then IMMEDIATE, else FIFO
+    {
+        uint32_t pmCount = 0;
+        fn_.GetPhysicalDeviceSurfacePresentModesKHR(phys_, surface_, &pmCount, nullptr);
+        std::vector<VkPresentModeKHR> modes(pmCount);
+        if (pmCount > 0)
+            fn_.GetPhysicalDeviceSurfacePresentModesKHR(phys_, surface_, &pmCount, modes.data());
+        auto has = [&](VkPresentModeKHR m) {
+            return std::find(modes.begin(), modes.end(), m) != modes.end();
+        };
+        if (preferVsync_) {
+            sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+            LOGI("using FIFO present mode (VSync on)");
+        } else if (has(VK_PRESENT_MODE_MAILBOX_KHR)) {
+            sci.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+            LOGI("using MAILBOX present mode (VSync off)");
+        } else if (has(VK_PRESENT_MODE_IMMEDIATE_KHR)) {
+            sci.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+            LOGI("using IMMEDIATE present mode (VSync off)");
+        } else {
+            sci.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+            LOGI("using FIFO present mode (no uncapped mode offered)");
+        }
+    }
     sci.clipped = VK_TRUE;
     VkSwapchainKHR old = swapchain_;
     sci.oldSwapchain = old;
