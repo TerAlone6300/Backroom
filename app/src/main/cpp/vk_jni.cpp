@@ -20,7 +20,7 @@ struct Handle {
 
 extern "C" {
 
-JNIEXPORT jlong JNICALL Java_com_backrooms_game_VkNative_create(JNIEnv* env, jclass, jobject surface, jint w, jint h) {
+JNIEXPORT jlong JNICALL Java_com_backrooms_game_VkNative_create(JNIEnv* env, jclass, jobject surface, jint w, jint h, jboolean preferVsync) {
     ANativeWindow* win = ANativeWindow_fromSurface(env, surface);
     if (!win) { gLastError = "ANativeWindow_fromSurface failed"; return 0; }
     auto* hd = new Handle();
@@ -35,7 +35,7 @@ JNIEXPORT jlong JNICALL Java_com_backrooms_game_VkNative_create(JNIEnv* env, jcl
             VkSurfaceKHR s = VK_NULL_HANDLE;
             return create(inst, &ci, nullptr, &s) == VK_SUCCESS ? s : VK_NULL_HANDLE;
         },
-        static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+        static_cast<uint32_t>(w), static_cast<uint32_t>(h), preferVsync == JNI_TRUE);
     if (!ok) { gLastError = hd->presenter.error(); delete hd; return 0; }
     return reinterpret_cast<jlong>(hd);
 }

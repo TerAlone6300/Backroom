@@ -56,6 +56,8 @@ class GlesPresenter(private val surface: Surface, private val w: Int, private va
         eglSurface = EGL14.eglCreateWindowSurface(display, config, surface, intArrayOf(EGL14.EGL_NONE), 0)
         check(eglSurface != EGL14.EGL_NO_SURFACE) { "eglCreateWindowSurface failed" }
         check(EGL14.eglMakeCurrent(display, eglSurface, eglSurface, context)) { "eglMakeCurrent failed" }
+        // VSync: 1 = sync to display, 0 = uncapped (driver may still pace). Applied at create; toggle forces a new presenter.
+        EGL14.eglSwapInterval(display, if (Settings.vsync) 1 else 0)
 
         val scene = assets.open("shaders/scene.glsl").bufferedReader().use { it.readText() }
         program = link(VERT, FRAG_PREFIX + scene)
@@ -75,7 +77,8 @@ class GlesPresenter(private val surface: Surface, private val w: Int, private va
         GLES30.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
         params(GLES20.GL_TEXTURE_2D, GLES20.GL_LINEAR, GLES20.GL_CLAMP_TO_EDGE)   // a CPU frame is scaled smoothly
         GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 4)
-        name = "OpenGL ES (${GLES20.glGetString(GLES20.GL_RENDERER) ?: "?"})"
+        val mode = if (Settings.vsync) "VSync" else "uncapped"
+        name = "OpenGL ES (${GLES20.glGetString(GLES20.GL_RENDERER) ?: "?"}, $mode)"
     }
 
     override fun presentScene(scene: SceneData, viewW: Int, viewH: Int): Boolean {

@@ -336,7 +336,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         for (o in others) if (o.size > 2 && o[2].toInt() == lv) {
             // isolated levels hide other players, even right next to you (except inside the Manila Room)
             if (d.isolated && !(lv == 0 && Manila.inside(x, y) && Manila.inside(o[0], o[1]))) continue
-            items.add(doubleArrayOf(o[0], o[1], 0.0))
+            items.add(if (o.size > 4) doubleArrayOf(o[0], o[1], 0.0, 3.0, o[3], o[4]) else doubleArrayOf(o[0], o[1], 0.0)) // 3.0 = textured player model: [x, y, 0, 3, id, yaw]
         }
         ow?.extraSprites(x, y, items)
         for (e in g.entities) items.add(if (e.passive && isMonster(e.type)) doubleArrayOf(e.x, e.y, e.type.toDouble(), 2.0) else doubleArrayOf(e.x, e.y, (if (e.type == E_IVLANIA) Hortus.IVLANIA + Math.floorMod(System.identityHashCode(e), 8) else e.type).toDouble()))
@@ -347,7 +347,10 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         return items
     }
 
-    fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true) {
+    /** Skin used for players whose own skin has not arrived (or is the default one). Platforms may replace it, e.g. with PlayerSkinAssets.load(...). */
+    @Volatile var defaultSkin: SkinTexture = DefaultPlayerSkin.texture
+
+    fun render(px: IntArray, g: Game, t: Double, others: Collection<DoubleArray>, hud: Boolean = true, skins: Map<Int, RemotePlayerSkin> = emptyMap()) {
         val lv = g.level; val d = levelDef(lv); val ts = texOf(lv); val tn = d.tint
         val x = g.x; val y = g.y; val a = g.a
         spec = levelSpec(lv); zonesOn = spec.zones; for (b in bands) b.zx = Int.MIN_VALUE
@@ -402,7 +405,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
                 var sdx = if (rx < 0) (x - mapX) * ddx else (mapX + 1 - x) * ddx
                 var sdy = if (ry < 0) (y - mapY) * ddy else (mapY + 1 - y) * ddy
                 var side = 0; var n = 0
-                while (n++ < 64) {
+                while (n++ < Settings.ddaSteps()) {
                     if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
                     if (isWall(lv, mapX, mapY)) break
                 }
@@ -441,6 +444,12 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val tx = inv * (dy * rx - dx * ry); val ty = inv * (-plY * rx + plX * ry)
             if (ty <= 0.2) continue
             val sx = (W / 2 * (1 + tx / ty)).toInt(); val full = H * vs / ty
+            if (type == 0 && o.size > 5 && o[3] == 3.0) { // another player: textured block model, feet on the floor, hidden behind walls by the z-buffer
+                val tex = skins[o[4].toInt()]?.texture ?: defaultSkin
+                PlayerSkinRenderer.draw(px, W, H, zb, tex, o[0], o[1], o[5], x, y, a, Math.toRadians(Settings.fov.toDouble()),
+                    hz + (full * ch).toInt(), 0.9, { dd -> 0.55 + 0.45 / (1 + dd * 0.3) }, verticalScale = H * vs / (W / (2.0 * pl)))
+                continue
+            }
             val hk = when (type) { 1 -> 0.6; 5 -> 0.3; 6 -> 0.85; 7 -> 0.95; 9 -> 1.05; 10 -> 0.3; S_RATION -> 0.2; S_WATER -> 0.26; S_LAMP -> 1.7; S_VINE -> 0.95; S_GATE -> 1.0; S_CUBE -> 0.6; in S_FLOWER..S_FLOWER + 4 -> 0.5; else -> 0.9 }
             val wk = when (type) { 1 -> 1.7; 2 -> 0.5; 5 -> 1.6; 6 -> 1.25; 7 -> 0.45; 9 -> 0.55; 10 -> 2.0; S_RATION -> 0.9; S_WATER -> 0.55; S_LAMP -> 0.25; S_VINE -> 0.5; S_GATE -> 0.8; S_CUBE -> 1.0; in S_FLOWER..S_FLOWER + 4 -> 1.1; else -> 0.42 }
             val sh = (full * hk).toInt().coerceAtLeast(2)
@@ -548,7 +557,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
                 var sdx = if (rx < 0) (x - mapX) * ddx else (mapX + 1 - x) * ddx
                 var sdy = if (ry < 0) (y - mapY) * ddy else (mapY + 1 - y) * ddy
                 var side = 0; var n = 0
-                while (n++ < 64) {
+                while (n++ < Settings.ddaSteps()) {
                     if (sdx < sdy) { sdx += ddx; mapX += stepX; side = 0 } else { sdy += ddy; mapY += stepY; side = 1 }
                     if (isWall(lv, mapX, mapY)) break
                 }
@@ -584,7 +593,7 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val dim = (0.55 + 0.45 / (1 + ty * 0.3)).let { if (type in 20..49) max(0.85, it) else if (o.size > 3 && o[3] == 1.0) it * 0.6 else it }
             boxes.add(doubleArrayOf(sx.toDouble(), sw.toDouble(), top.toDouble(), sh.toDouble(), type.toDouble(), dim, if (o.size > 3 && o[3] == 2.0) 1.0 else 0.0, ty))
         }
-        val ns = min(boxes.size, Scene.MAX_SPR); val first = boxes.size - ns // too many: the farthest ones are dropped
+        val ns = min(boxes.size, Settings.maxSprites()); val first = boxes.size - ns // too many: the farthest ones are dropped
         for (i in 0 until ns) {
             val bx = boxes[first + i]
             out.put(Scene.SPR + i * 2, bx[0], bx[1], bx[2], bx[3]); out.put(Scene.SPR + i * 2 + 1, bx[4], bx[5], bx[6], bx[7])
@@ -595,17 +604,19 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         val rk = (dgr * 180).toInt()
         val fadeI = ((if (g.dead) (1 - g.deadT / 1.2).coerceIn(0.0, 1.0) else 1.0) * 256).toInt()
         val wash = ((g.noclip * g.noclip * 150) + g.flash * 255).toInt()
-        val amp = 1 + (g.near * 2).toInt()
+        // Low quality: no film grain (amp stays 0 → shader skips hash); Medium/High keep near-entity grain.
+        val amp = if (Settings.grainOn()) 1 + (g.near * 2).toInt() else 0
         val seed = grain
         grain = seed * 1664525 + 1013904223
         var ng = 0
         val gk = max(g.noclip, g.near * 0.3)
-        if (gk > 0.02) {
+        val maxGli = Settings.maxGlitch()
+        if (gk > 0.02 && maxGli > 0) {
             var q = grain
             repeat((gk * 50).toInt() + 1) {
                 q = q * 1664525 + 1013904223; val row = ((q ushr 8) and 0xFFFF) % H
                 q = q * 1664525 + 1013904223; val sh = ((((q ushr 8) and 0xFF) - 128) * gk * 0.35 * ps).toInt()
-                if (sh != 0 && ng < Scene.MAX_GLI) out.put(Scene.GLI + ng++, row.toDouble(), sh.toDouble(), 0.0, 0.0)
+                if (sh != 0 && ng < maxGli) out.put(Scene.GLI + ng++, row.toDouble(), sh.toDouble(), 0.0, 0.0)
             }
         }
 
@@ -652,9 +663,11 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         out.put(6, W.toDouble(), H.toDouble(), kx0.toDouble(), ky0.toDouble())
         out.put(7, if (lv == LV_SUBLIMITY) 1.0 else 0.0, if (lv == 0) 1.0 else 0.0, Manila.CX.toDouble(), Manila.CY.toDouble())
         out.put(8, rk.toDouble(), fadeI.toDouble(), wash.toDouble(), amp.toDouble())
-        out.put(9, ((seed ushr 8) and 0xFFFF).toDouble(), (worldSeed and 0xFFFF).toDouble(), (worldSeed ushr 16).toDouble(), 0.0)
+        // D(9).w = quality tier (0 Low / 1 Med / 2 High) for shader early-outs
+        out.put(9, ((seed ushr 8) and 0xFFFF).toDouble(), (worldSeed and 0xFFFF).toDouble(), (worldSeed ushr 16).toDouble(), Settings.quality.toDouble())
         out.put(10, if (g.halluc > 0.04) g.halluc else 0.0, ng.toDouble(), ns.toDouble(), nh.toDouble())
         out.put(Scene.CELL, floor(x), floor(y), x - floor(x), y - floor(y))
+        out.dataSerial++
         return true
     }
 

@@ -1,4 +1,4 @@
-name: Compile
+name: Simple Compile
 
 on:
   pull_request:
@@ -119,17 +119,3 @@ jobs:
           path: |
             app/build/outputs/apk/release/*.apk
             app/build/outputs/apk/debug/*.apk
-
-  release:
-    name: Publish release
-    needs: [desktop, android]
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts

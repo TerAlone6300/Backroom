@@ -2,7 +2,7 @@
 
 **Backrooms** là một trò chơi khám phá góc nhìn thứ nhất mang bầu không khí kinh dị, lấy cảm hứng từ vũ trụ Backrooms.
 
-Khám phá những không gian vô tận mang cảm giác siêu thực, tìm đường qua các môi trường được tạo theo thuật toán, phát hiện những bức tường không ổn định và tìm lối thoát qua các tầng khác nhau.
+Khám phá những không gian vô tận mang cảm giác siêu thực, tìm đường qua các môi trường được tạo theo thuật toán, phát hiện những bức tường không ổn định, sống sót trước các thực thể nguy hiểm và tìm lối thoát qua các tầng khác nhau.
 
 ## Tính năng
 
@@ -10,7 +10,7 @@ Khám phá những không gian vô tận mang cảm giác siêu thực, tìm đ�
 - **Môi trường được tạo theo thuật toán** – Mỗi ván chơi mới tạo ra một thế giới hoàn toàn ngẫu nhiên từ một seed riêng. Seed được lưu cùng bản lưu; trong multiplayer, máy chủ gửi seed của mình cho mọi người chơi nên ai cũng ở trong cùng một thế giới. Bản lưu và máy chủ phiên bản cũ vẫn mở đúng thế giới ban đầu.
 - **Nhiều tầng khác nhau** – Mỗi tầng có môi trường, bố cục và tiến trình riêng.
 - **Tường Noclip** – Khám phá những bức tường không ổn định, cho phép di chuyển đến các tầng khác.
-- **Nhiều người chơi (Multiplayer)** – Kết nối với máy chủ Multiplayer thông qua địa chỉ IP và cổng kết nối.
+- **Nhiều người chơi (Multiplayer)** – Kết nối với máy chủ Multiplayer thông qua địa chỉ IP và cổng kết nối; có các thành phần nền tảng cho máy chủ LAN tự quảng bá, dò tìm world trong cùng mạng và lưu địa chỉ máy chủ.
 - **Hệ thống lưu trò chơi** – Lưu tiến trình, tải lại trò chơi và quản lý các ô lưu.
 - **Tùy chỉnh cài đặt** – Điều chỉnh góc nhìn, sương mù và độ khó.
 - **Tối ưu hóa kết xuất hình ảnh** – Sử dụng bộ nhớ đệm theo từng khu vực và tối ưu hóa quá trình kết xuất để cải thiện hiệu năng.
@@ -132,6 +132,9 @@ Khung hình mặc định ở 1080p (1920×1080). Có thể đổi trong Options
 
 - **Canvas**: CPU vẽ toàn bộ khung hình rồi Android hiển thị. Hoạt động trên mọi máy.
 - **OpenGL ES** (cần ES 3.0, `gpu/GlesPresenter.kt`) và **Vulkan** (`app/src/main/cpp`, nạp `libvulkan` lúc chạy nên `minSdk` vẫn là 21): GPU tự vẽ hình 3D (sàn, trần, tường, sprite, hiệu ứng, minimap) từ dữ liệu cảnh bằng một shader dùng chung cho cả hai, `app/src/main/assets/shaders/scene.glsl`. CPU chỉ còn chiếu tia theo từng cột, tính đèn nhấp nháy và danh sách sprite (`Renderer.buildScene`), tốn chưa tới 1 ms thay vì hàng chục ms ở 1080p, và chi phí này không tăng theo độ phân giải.
+- **Adreno / Freedreno / Turnip**: Trên GPU Qualcomm Adreno, Vulkan thường mượt hơn OpenGL ES. Driver hệ thống Qualcomm tốt; driver mã nguồn mở **Turnip** (phần Vulkan của Mesa Freedreno) thường hỗ trợ nhiều extension hơn và đôi khi nhanh hơn trên Adreno 6xx/7xx. Có thể dùng thư viện AdrenoTools (hoặc tương tự) để nạp driver Turnip tùy chỉnh cho app mà không cần root. Tên renderer hiển thị trong Options sẽ chứa "Adreno", "Freedreno" hoặc "Mesa" tùy driver.
+- **FPS Limit & VSync** (Options → GRAPHICS): FPS Limit 30 / 60 / 90 / 120 / 144 / 240 / Ultimate (không giới hạn). VSync ON dùng FIFO (khóa theo màn hình); OFF dùng MAILBOX rồi IMMEDIATE khi driver hỗ trợ. Đổi VSync sẽ tạo lại presenter. FPS Limit áp dụng bằng sleep trên vòng lặp game, hoạt động cùng VSync.
+- **Quality** Low / Medium / High (kiểu Sodium): Low = ít bước DDA/sprite hơn, tắt grain/glitch/gợn nước; Medium cân bằng; High đủ fidelity. GLES đọc `scene.glsl` lúc chạy; sau khi sửa GLSL chạy `app/src/main/cpp/shaders/compile_shaders.sh` để cập nhật SPIR-V Vulkan.
 
 Bốn level thế giới mở (City, Island, Graveyard và Hortus Aeturnus) có mặt đất và tòa nhà được sinh bằng mã riêng, chưa chuyển sang shader, nên ở đó CPU vẫn vẽ khung hình rồi đưa lên GPU để phóng to.
 

@@ -36,6 +36,7 @@ float gW, gH; int gKx0, gKy0;
 bool gWater, gManilaOn; int gManilaX, gManilaY;
 int gBx, gBy; float gFx, gFy;
 uint gSeed;
+int gQuality;   // 0 Low / 1 Medium / 2 High — from Settings.quality
 
 void loadHeader() {
     vec4 a;
@@ -47,7 +48,7 @@ void loadHeader() {
     a = D(5);  gTn = a.xyz; gZones = a.w > 0.5;
     a = D(6);  gW = a.x; gH = a.y; gKx0 = int(a.z); gKy0 = int(a.w);
     a = D(7);  gWater = a.x > 0.5; gManilaOn = a.y > 0.5; gManilaX = int(a.z); gManilaY = int(a.w);
-    a = D(9);  gSeed = uint(a.y) | (uint(a.z) << 16u);
+    a = D(9);  gSeed = uint(a.y) | (uint(a.z) << 16u); gQuality = int(a.w);
     a = D(13); gBx = int(a.x); gBy = int(a.y); gFx = a.z; gFy = a.w;
 }
 
@@ -103,7 +104,8 @@ vec3 floorCeil(int xx, int yy) {
     float l = man ? 1.05 : lightAt(lx, ly, off) * gGl;
     if (dr > 0) {
         float wat = 1.0;
-        if (gWater) wat = 0.85 + 0.2 * sin((float(gBx) + lx) * 9.0 + gT * 1.5) * sin((float(gBy) + ly) * 9.0 + gT * 1.1);
+        // Low quality: skip water ripple (ALU + trig) — flat wet look still via 0.85
+        if (gWater) wat = (gQuality < 1) ? 0.85 : (0.85 + 0.2 * sin((float(gBx) + lx) * 9.0 + gT * 1.5) * sin((float(gBy) + ly) * 9.0 + gT * 1.1));
         return mulc(texel(base + 1, tx, ty), l * fog * 0.85 * wat, gTn);
     }
     int p = int(gPeriod);
@@ -117,8 +119,9 @@ vec3 wallPixel(int xx, int yy, vec4 A, vec4 B, vec4 C) {
     int ty = min(63, int(float(yy - start) * (64.0 / float(lineH))));
     int base = C.y > 0.5 ? 4 : 0;
     if (C.x > 0.5) {   // an unstable wall wobbles and turns pale blue
-        int tx2 = (tx + int(sin(gT * 11.0 + float(yy) * 0.25) * 4.0)) & 63;
-        float brw = B.w * (0.85 + 0.3 * sin(gT * 7.0 + float(xx) * 0.1));
+        // Low quality: fixed pale-blue unstable look, no per-pixel sin wobble
+        int tx2 = (gQuality < 1) ? tx : ((tx + int(sin(gT * 11.0 + float(yy) * 0.25) * 4.0)) & 63);
+        float brw = (gQuality < 1) ? B.w * 0.95 : (B.w * (0.85 + 0.3 * sin(gT * 7.0 + float(xx) * 0.1)));
         vec3 c0 = mulc(texel(base, tx2, ty), brw, gTn);
         return clamp(vec3(floor(c0.r * 3.0 / 4.0), c0.g + 25.0, c0.b + 60.0), 0.0, 255.0);
     }
@@ -296,14 +299,17 @@ int rowShift(int y) {   // glitch rows plus the hallucination sway: rotations ju
     vec4 e = D(10);
     int ng = int(e.y);
     float s = 0.0;
-    for (int i = 0; i < 64; i++) {
-        if (i >= ng) break;
-        vec4 g = D(GLI + i);
-        if (int(g.x) == y) s += g.y;
-    }
-    if (e.x > 0.0) {
-        float amp = e.x * 5.0 * gPs, yy = float(y);
-        s += float(int(sin(yy * 0.11 + gT * 2.3) * amp + sin(yy * 0.047 - gT * 1.1) * amp * 0.6));
+    // Low quality: no glitch row scan (CPU already wrote ng=0); skip halluc sway trig
+    if (gQuality >= 1) {
+        for (int i = 0; i < 64; i++) {
+            if (i >= ng) break;
+            vec4 g = D(GLI + i);
+            if (int(g.x) == y) s += g.y;
+        }
+        if (e.x > 0.0) {
+            float amp = e.x * 5.0 * gPs, yy = float(y);
+            s += float(int(sin(yy * 0.11 + gT * 2.3) * amp + sin(yy * 0.047 - gT * 1.1) * amp * 0.6));
+        }
     }
     return int(s);
 }
@@ -313,7 +319,11 @@ vec3 post(vec3 c, int xx, int yy) {
     float nx = (float(xx) - gW / 2.0) / (gW / 2.0), ny = (float(yy) - gH / 2.0) / (gH / 2.0);
     float vig = floor(clamp(1.0 - 0.38 * (nx * nx + ny * ny), 0.3, 1.0) * 256.0);
     float v = floor(vig * p.y / 256.0);
-    float nz = (float((hash3(uint(xx), uint(yy), uint(D(9).x)) >> 8u) & 15u) - 8.0) * p.w;
+    // Low quality / zero grain amount: skip film-grain hash (expensive per pixel on Adreno)
+    float nz = 0.0;
+    if (p.w != 0.0 && gQuality >= 2) {
+        nz = (float((hash3(uint(xx), uint(yy), uint(D(9).x)) >> 8u) & 15u) - 8.0) * p.w;
+    }
     vec3 o = floor(c * v / 256.0) + nz;
     if (p.x != 0.0 || p.z != 0.0) {
         o.r += floor((256.0 - vig) * p.x / 256.0) + p.z;
