@@ -416,8 +416,11 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         }
         small(c, if (playing && g.hardcoreRun) "Hardcore run: difficulty is locked." else DIFFS[Settings.diff].blurb, dl, y + 8 * dp, 9.5f, Color.rgb(200, 195, 160), Paint.Align.LEFT)
         }
-        btn(c, RectF(w / 2 - 150 * dp, h - 52 * dp, w / 2 - 10 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
-        btn(c, RectF(w / 2 + 10 * dp, h - 52 * dp, w / 2 + 150 * dp, h - 12 * dp), "GRAPHICS", false, a) { optPage = 1 }
+        btn(c, RectF(w / 2 - 160 * dp, h - 52 * dp, w / 2 - 55 * dp, h - 12 * dp), "BACK", false, a) { closeOptions() }
+        btn(c, RectF(w / 2 - 45 * dp, h - 52 * dp, w / 2 + 55 * dp, h - 12 * dp), "GRAPHICS", false, a) { optPage = 1 }
+        btn(c, RectF(w / 2 + 65 * dp, h - 52 * dp, w / 2 + 175 * dp, h - 12 * dp), I18n.langName().uppercase(), false, a) {
+            I18n.toggle(); Store.saveProfile()
+        }
     }
 
     /** Renderer, frame size, FPS limit and VSync. */

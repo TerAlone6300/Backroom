@@ -370,7 +370,10 @@ fun main(argv: Array<String>) {
             }
             txt(g2, "drag the sliders  ·  LEFT / RIGHT  fine tune FOV", cx, hh - hh / 9, Font("SansSerif", Font.ITALIC, hh / 56), Color(170, 165, 140))
             val bb = hh / 14
-            btn(g2, Rectangle(cx - 90, hh - bb - hh / 40, 180, bb), "BACK", false, ac) { closeOptions() }
+            btn(g2, Rectangle(cx - 200, hh - bb - hh / 40, 160, bb), "BACK", false, ac) { closeOptions() }
+            btn(g2, Rectangle(cx - 20, hh - bb - hh / 40, 320, bb), "LANGUAGE: " + I18n.langName(), false, ac) {
+                I18n.toggle(); Store.saveProfile()
+            }
         }
 
         fun drawPause(g2: Graphics2D) {

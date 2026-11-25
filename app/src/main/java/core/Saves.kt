@@ -39,6 +39,7 @@ object Store {
     }
 
     fun init(d: File) {
+        I18n.lang = I18n.systemLang()
         dir = d; File(d, "saves").mkdirs()
         runCatching {
             val f = File(d, "profile.properties")
@@ -48,6 +49,7 @@ object Store {
                 p.getProperty("fog")?.toIntOrNull()?.let { Settings.putFog(it) }
                 p.getProperty("renderer")?.toIntOrNull()?.let { Settings.renderer = it.coerceIn(R_CANVAS, R_VULKAN) }
                 p.getProperty("frame")?.toIntOrNull()?.let { Settings.putFrame(it) }
+                p.getProperty("lang")?.let { I18n.lang = I18n.fromCode(it) }
                 p.getProperty("fpsLimit")?.toIntOrNull()?.let { Settings.putFpsLimit(it) }
                 p.getProperty("vsync")?.let { Settings.putVsync(it == "1" || it.equals("true", ignoreCase = true)) }
                 p.getProperty("quality")?.toIntOrNull()?.let { Settings.putQuality(it) }
@@ -62,6 +64,7 @@ object Store {
         runCatching {
             put(File(d, "profile.properties"), java.util.Properties().apply {
                 setProperty("fov", Settings.fov.toString()); setProperty("fog", Settings.fog.toString()); setProperty("renderer", Settings.renderer.toString()); setProperty("frame", Settings.frameH.toString())
+                setProperty("lang", I18n.lang)
                 setProperty("fpsLimit", Settings.fpsLimit.toString()); setProperty("vsync", if (Settings.vsync) "1" else "0")
                 setProperty("quality", Settings.quality.toString())
                 setProperty("ids", "2"); setProperty("found", Progress.all().joinToString(","))
