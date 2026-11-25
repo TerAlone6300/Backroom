@@ -583,7 +583,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         btn(c, RectF(pv.left, by, pv.left + half, by + bh), "IMPORT", false, a) { pickSkinFiles() }
         btn(c, RectF(pv.left + half + 8 * dp, by, pv.right, by + bh), "BACK", true, a) { scr = drBack }
         val dir = SkinLibrary.dirs.firstOrNull()?.path ?: ""
-        small(c, if (drMsg.isNotEmpty()) drMsg else "Packs (.brpack / .mcpack) are saved in $dir  ·  IMPORT a .png to wear it once", w / 2, h - 10 * dp, 9f, Color.rgb(200, 195, 160))
+        small(c, if (drMsg.isNotEmpty()) drMsg else "Packs (.brpack / .mcpack) are saved in $dir  ·  IMPORT a .png: it stays until you import another", w / 2, h - 10 * dp, 9f, Color.rgb(200, 195, 160))
     }
 
     /** In-game buttons: small options icon (top-centre) and the walk / run toggle (bottom-right). */

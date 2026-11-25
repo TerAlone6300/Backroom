@@ -263,7 +263,7 @@ fun main(argv: Array<String>) {
             btn(g2, Rectangle(pv.x + bw / 2 + gap / 2, y, bw / 2 - gap / 2, bh), "FOLDER", false, ac) { openSkinFolder() }; y += bh + gap
             btn(g2, Rectangle(pv.x, y, bw, bh), "BACK", true, ac) { scr = drBack }
             val dir = SkinLibrary.dirs.firstOrNull()?.path ?: ""
-            txt(g2, if (drMsg.isNotEmpty()) drMsg else "Skin packs (.brpack / .mcpack) are saved in $dir  ·  IMPORT a .png to wear it once", w / 2, hh - hh / 24, Font("SansSerif", Font.PLAIN, hh / 56), Color(200, 195, 160))
+            txt(g2, if (drMsg.isNotEmpty()) drMsg else "Skin packs (.brpack / .mcpack) are saved in $dir  ·  IMPORT a .png: it stays until you import another", w / 2, hh - hh / 24, Font("SansSerif", Font.PLAIN, hh / 56), Color(200, 195, 160))
         }
 
         /** Side drawer with the unlocked levels; the arrow tab on the left edge opens it. */

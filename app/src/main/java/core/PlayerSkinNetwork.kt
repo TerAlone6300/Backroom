@@ -101,6 +101,90 @@ internal class SkinAwareRelay(private val seed: Int) {
     private fun send(peer: Peer, line: String) = synchronized(peer.lock) { peer.writer.println(line) }
 }
 
+/**
+ * Client half of the skin exchange with the server (the counterpart of [SkinAwareRelay]).
+ * - uploads our skin: SKIN_DEFAULT, or SKIN_BEGIN / SKIN_CHUNK / SKIN_END;
+ * - receives everybody else's skin and keeps the table [players] that the renderer reads;
+ * - is hooked into [SkinLibrary]: when the worn skin changes (Dressing Room pick, new external skin...) the new one is uploaded at once,
+ *   from a worker thread (never the UI thread: Android refuses network writes there). Changes are applied in order, so the last choice wins.
+ */
+internal class SkinClientTransport(private val writeLock: Any, private val writer: () -> PrintWriter?) {
+    val players = ConcurrentHashMap<Int, RemotePlayerSkin>()
+    private class Incoming(val expectedBytes: Int, val data: ByteArrayOutputStream = ByteArrayOutputStream(), var nextSequence: Int = 0)
+    private val pending = ConcurrentHashMap<Int, Incoming>()
+    @Volatile private var ownId = 0
+    @Volatile private var ownPng: ByteArray? = SkinLibrary.selected().png?.copyOf() // the skin worn when the connection is made
+
+    private val sender = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "backrooms-skin-send").apply { isDaemon = true } }
+    private val changeHook: (SkinEntry) -> Unit = { e -> runCatching { sender.execute { runCatching { setOwn(e.png) } } } }
+    init { SkinLibrary.addChangeListener(changeHook) }
+
+    /** The server told us our player id: announce our skin. */
+    fun onId(playerId: Int) { ownId = playerId; players[playerId] = RemotePlayerSkin(isDefault = ownPng == null); uploadOwn() }
+
+    /** Skin available for the local player; null means use the shared default skin. Uploads it if we are connected. */
+    fun setOwn(png: ByteArray?) {
+        if (png == null) ownPng = null else {
+            require(png.size in 33..SkinWire.MAX_SKIN_BYTES)
+            SkinTexture.fromPng(png)
+            ownPng = png.copyOf()
+        }
+        if (ownId != 0) uploadOwn()
+    }
+
+    private fun uploadOwn() {
+        val playerId = ownId; val png = ownPng
+        if (png == null) {
+            players[playerId] = RemotePlayerSkin(isDefault = true)
+            synchronized(writeLock) { writer()?.println("SKIN_DEFAULT $playerId") }
+            return
+        }
+        val texture = runCatching { SkinTexture.fromPng(png) }.getOrNull() ?: return
+        players[playerId] = RemotePlayerSkin(isDefault = false, texture = texture, png = png)
+        synchronized(writeLock) {
+            val w = writer() ?: return
+            w.println("SKIN_BEGIN $playerId ${png.size}")
+            var offset = 0; var sequence = 0
+            while (offset < png.size) {
+                val size = minOf(SkinWire.CHUNK_BYTES, png.size - offset)
+                w.println("SKIN_CHUNK $playerId ${sequence++} ${SkinWire.encodeBase64(png, offset, size)}")
+                offset += size
+            }
+            w.println("SKIN_END $playerId")
+        }
+    }
+
+    /** One SKIN_* line from the server (already split on spaces). */
+    fun receive(p: List<String>) {
+        when (p.firstOrNull()) {
+            "SKIN_DEFAULT" -> p.getOrNull(1)?.toIntOrNull()?.let { players[it] = RemotePlayerSkin(isDefault = true); pending.remove(it) }
+            "SKIN_BEGIN" -> if (p.size == 3) {
+                val playerId = p[1].toIntOrNull(); val size = p[2].toIntOrNull()
+                if (playerId != null && size != null && playerId > 0 && size in 33..SkinWire.MAX_SKIN_BYTES) pending[playerId] = Incoming(size)
+            }
+            "SKIN_CHUNK" -> if (p.size == 4) {
+                val playerId = p[1].toIntOrNull(); val seq = p[2].toIntOrNull(); val bytes = SkinWire.decodeBase64(p[3])
+                val inc = playerId?.let { pending[it] }
+                if (inc != null && seq == inc.nextSequence && bytes != null && inc.data.size().toLong() + bytes.size <= inc.expectedBytes) {
+                    inc.data.write(bytes); inc.nextSequence++
+                } else if (playerId != null) pending.remove(playerId)
+            }
+            "SKIN_END" -> p.getOrNull(1)?.toIntOrNull()?.let { playerId ->
+                val inc = pending.remove(playerId)
+                if (inc != null && inc.data.size() == inc.expectedBytes) {
+                    val png = inc.data.toByteArray()
+                    val texture = runCatching { SkinTexture.fromPng(png) }.getOrNull()
+                    if (texture != null) players[playerId] = RemotePlayerSkin(isDefault = false, texture = texture, png = png)
+                }
+            }
+        }
+    }
+
+    fun forget(playerId: Int) { players.remove(playerId); pending.remove(playerId) }
+    fun clear() { players.clear(); pending.clear() }
+    fun close() { SkinLibrary.removeChangeListener(changeHook); sender.shutdown(); clear() }
+}
+
 internal object SkinWire {
     const val MAX_SKIN_BYTES = 8 * 1024 * 1024
     const val CHUNK_BYTES = 12 * 1024

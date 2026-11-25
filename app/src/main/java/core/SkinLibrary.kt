@@ -2,7 +2,7 @@ package com.backrooms.game
 // SkinLibrary.kt - the player's skins.
 //   * the built-in default skin;
 //   * skin packs (.brpack, or Bedrock .mcpack): SAVED in the skins folder, one pack can hold many named skins;
-//   * ONE external skin (a loose .png): NOT saved - it lives in memory in a single slot and a newer external skin replaces it.
+//   * ONE external skin (a loose .png): kept in its own single slot (<skins folder>/external/) until a newer external skin replaces it; the old one is deleted.
 // Every change of the worn skin is announced through [addChangeListener]; Net uses it to send the skin to the server.
 // Shared by desktop and Android (pure Kotlin/JVM, no AWT/Android imports).
 import java.io.File
@@ -16,12 +16,13 @@ class SkinEntry(val id: String, val name: String, val pack: String?, val source:
 /** One line of the Dressing Room list: a pack title ([header] + number of skins) or a skin ([entry]). */
 class SkinRow(val header: String?, val count: Int, val entry: SkinEntry?)
 
-/** What an import did: kind is "pack" (saved) or "external" (the single unsaved slot). */
+/** What an import did: kind is "pack" (added to the saved packs) or "external" (the single external slot). */
 class ImportResult(val kind: String, val label: String, val skins: Int)
 
 object SkinLibrary {
     const val DEFAULT_ID = "default"
     const val EXTERNAL_ID = "external"
+    private const val EXTERNAL_SOURCE = "external · kept until replaced"
     private const val MAX_FILE_BYTES = 32L * 1024 * 1024  // a pack bigger than this is ignored / refused
     private val PACK_EXT = setOf("brpack", "mcpack")
 
@@ -30,7 +31,7 @@ object SkinLibrary {
     @Volatile var selectedId = DEFAULT_ID
     @Volatile var entries: List<SkinEntry> = listOf(defaultEntry())
         private set
-    @Volatile private var external: SkinEntry? = null   // the one unsaved external skin
+    @Volatile private var external: SkinEntry? = null   // the one external skin (also kept on disk until replaced)
     private val listeners = CopyOnWriteArrayList<(SkinEntry) -> Unit>()
 
     fun init(folders: List<File>) { dirs = folders; folders.forEach { runCatching { it.mkdirs() } }; reload() }
@@ -42,9 +43,19 @@ object SkinLibrary {
     fun removeChangeListener(l: (SkinEntry) -> Unit) { listeners.remove(l) }
     private fun fireChanged() { val e = selected(); for (l in listeners) runCatching { l(e) } }
 
-    /** Re-reads the saved packs. Broken files are skipped, never fatal. */
+    private fun externalDir(): File? = dirs.firstOrNull()?.let { File(it, "external") }
+
+    /** The external skin that was kept on disk by an earlier session (the only .png in the external folder). */
+    private fun loadExternal(): SkinEntry? = runCatching {
+        val f = externalDir()?.listFiles()?.filter { it.isFile && it.extension.equals("png", true) && it.length() in 33..SkinWire.MAX_SKIN_BYTES }?.maxByOrNull { it.lastModified() } ?: return null
+        val bytes = f.readBytes()
+        SkinEntry(EXTERNAL_ID, f.nameWithoutExtension, null, EXTERNAL_SOURCE, bytes, SkinTexture.fromPng(bytes))
+    }.getOrNull()
+
+    /** Re-reads the saved packs and the kept external skin. Broken files are skipped, never fatal. */
     fun reload(): List<SkinEntry> {
         val out = ArrayList<SkinEntry>(); out.add(defaultEntry())
+        if (external == null) external = loadExternal()
         external?.let { out.add(it) }
         val locale = if (I18n.isVi) "vi_VN" else "en_US"
         val seen = HashSet<String>()
@@ -77,10 +88,18 @@ object SkinLibrary {
 
     fun select(e: SkinEntry) { selectedId = e.id; Store.saveProfile(); fireChanged() }
 
-    /** Puts a loose skin picture into the single external slot (the previous external skin disappears) and wears it. Nothing is saved. */
+    /** Puts a loose skin picture into the single external slot and wears it. It is kept on disk until the next external skin replaces it; the previous one disappears. */
     fun setExternal(png: ByteArray, label: String): SkinEntry {
         val tex = SkinTexture.fromPng(png)
-        val e = SkinEntry(EXTERNAL_ID, label.ifBlank { "External" }, null, "external · not saved", png.copyOf(), tex)
+        val name = label.ifBlank { "External" }
+        val e = SkinEntry(EXTERNAL_ID, name, null, EXTERNAL_SOURCE, png.copyOf(), tex)
+        runCatching { // write the new file first, then drop the old one: a failure never loses the current skin
+            val dir = externalDir() ?: return@runCatching
+            dir.mkdirs()
+            val file = File(dir, name.replace(Regex("[^A-Za-z0-9._ \\-]"), "_").take(60).ifBlank { "external" } + ".png")
+            val tmp = File(dir, file.name + ".tmp"); tmp.writeBytes(png); tmp.renameTo(file).let { if (!it) { file.delete(); tmp.renameTo(file) } }
+            dir.listFiles()?.forEach { if (it != file) it.delete() }
+        }
         external = e
         entries = entries.filter { it.id != EXTERNAL_ID }.let { l -> listOf(l.first(), e) + l.drop(1) }
         selectedId = EXTERNAL_ID; fireChanged()
@@ -89,7 +108,7 @@ object SkinLibrary {
 
     /**
      * Imports a picked file. .brpack / .mcpack: copied into the skins folder (saved) and added to the list.
-     * .png: becomes the external skin (not saved, replaces the previous external skin). Returns null if the file is refused.
+     * .png: becomes the external skin (kept until replaced; the previous external skin is deleted). Returns null if the file is refused.
      */
     fun import(fileName: String, input: InputStream): ImportResult? {
         val clean = fileName.substringAfterLast('/').substringAfterLast('\\').replace(Regex("[^A-Za-z0-9._ \\-]"), "_").trim().ifEmpty { "skin" }

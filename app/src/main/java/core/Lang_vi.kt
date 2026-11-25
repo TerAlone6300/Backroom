@@ -197,5 +197,5 @@ val VI_STRINGS: Map<String, String> = mapOf(
     "%d skin(s)" to "",
     "Imported pack %s (%d skin(s))" to "",
     "External skin: %s" to "",
-    "external · not saved" to "",
+    "external · kept until replaced" to "",
 )
