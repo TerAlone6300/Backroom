@@ -191,8 +191,11 @@ val VI_STRINGS: Map<String, String> = mapOf(
     "FOLDER" to "",
     "WEARING" to "",
     "built-in" to "",
-    "Imported %d file(s)" to "",
     "Nothing imported: not a valid skin or skin pack" to "",
     "No file picker found" to "",
 
+    "%d skin(s)" to "",
+    "Imported pack %s (%d skin(s))" to "",
+    "External skin: %s" to "",
+    "external · not saved" to "",
 )

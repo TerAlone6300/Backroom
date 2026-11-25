@@ -106,7 +106,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
 
     private fun startGame(addr: String = "", lv: Int = 0, load: SaveData? = null) {
         net?.close()
-        net = if (addr.isEmpty()) null else addr.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start(); SkinLibrary.applyTo(it) } }
+        net = if (addr.isEmpty()) null else addr.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start() } }
         if (load != null) g.restore(load) else g.newGame(lv)
         slot = load?.id
         playT = 0.0; jx = 0f; jy = 0f; leftId = -1; rightId = -1; runOn = false; levelsOpen = false
@@ -141,12 +141,13 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         data.data?.let { uris.add(it) }
         data.clipData?.let { cd -> for (k in 0 until cd.itemCount) uris.add(cd.getItemAt(k).uri) }
         Thread {
-            var ok = 0
+            var last: ImportResult? = null
             for (u in uris) runCatching {
                 val name = act.contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cu -> if (cu.moveToFirst()) cu.getString(0) else null } ?: "skin.png"
-                act.contentResolver.openInputStream(u)?.use { if (SkinLibrary.import(name, it) != null) ok++ }
+                act.contentResolver.openInputStream(u)?.use { SkinLibrary.import(name, it)?.let { r -> last = r } }
             }
-            drMsg = if (ok > 0) Tf("Imported %d file(s)", ok) else "Nothing imported: not a valid skin or skin pack"
+            val r = last
+            drMsg = if (r == null) "Nothing imported: not a valid skin or skin pack" else if (r.kind == "pack") Tf("Imported pack %s (%d skin(s))", r.label, r.skins) else Tf("External skin: %s", r.label)
         }.start()
     }
 
@@ -550,13 +551,19 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         dim(c, 210, 190)
         heading(c, "DRESSING ROOM", a, h * 0.17f)
         val list = RectF(w * 0.05f, h * 0.26f, w * 0.55f, h - 26 * dp)
-        val rh = 46 * dp; val gp = 6 * dp; val skins = SkinLibrary.entries; val sel = SkinLibrary.selectedId
-        scrollY = scrollY.coerceIn(0f, max(0f, skins.size * (rh + gp) - list.height()))
+        val rh = 46 * dp; val gp = 6 * dp; val hdr = 22 * dp; val rows = SkinLibrary.rows(); val sel = SkinLibrary.selectedId
+        scrollY = scrollY.coerceIn(0f, max(0f, rows.sumOf { ((if (it.entry == null) hdr else rh) + gp).toDouble() }.toFloat() - list.height()))
         nextScroll = list
         c.save(); c.clipRect(list)
-        skins.forEachIndexed { k, e ->
-            val rc = RectF(list.left, list.top + k * (rh + gp) - scrollY, list.right, list.top + k * (rh + gp) - scrollY + rh)
-            if (rc.bottom < list.top || rc.top > list.bottom) return@forEachIndexed
+        var yy = list.top - scrollY
+        rows.forEach { row ->
+            val e = row.entry
+            if (e == null) { // title of a skin pack
+                small(c, row.header.orEmpty().uppercase() + "  ·  " + Tf("%d skin(s)", row.count), list.left + 4 * dp, yy + hdr - 5 * dp, 9f, a, Paint.Align.LEFT, 0.2f, true)
+                yy += hdr + gp; return@forEach
+            }
+            val rc = RectF(list.left, yy, list.right, yy + rh); yy += rh + gp
+            if (rc.bottom < list.top || rc.top > list.bottom) return@forEach
             val on = e.id == sel
             pFill.style = Paint.Style.FILL; pFill.color = Color.argb(175, 0, 0, 0); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill)
             if (on) { pFill.color = acc(levelDef(0), 60); c.drawRoundRect(rc, 10 * dp, 10 * dp, pFill) }
@@ -564,7 +571,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
             small(c, e.name, rc.left + 12 * dp, rc.top + 20 * dp, 12f, Color.WHITE, Paint.Align.LEFT, 0.02f, true)
             small(c, e.source, rc.left + 12 * dp, rc.bottom - 9 * dp, 8.5f, Color.rgb(190, 185, 160), Paint.Align.LEFT, 0.06f, true)
             if (on) small(c, "WEARING", rc.right - 12 * dp, rc.top + 20 * dp, 9f, a, Paint.Align.RIGHT, 0.2f, true)
-            hitClip(rc, list) { SkinLibrary.select(e, net) }
+            hitClip(rc, list) { SkinLibrary.select(e) }
         }
         c.restore()
         val pv = RectF(w * 0.60f, h * 0.26f, w * 0.95f, h * 0.70f)
@@ -576,7 +583,7 @@ class GameView(private val act: Activity, private val gpu: GpuFrameView) : Surfa
         btn(c, RectF(pv.left, by, pv.left + half, by + bh), "IMPORT", false, a) { pickSkinFiles() }
         btn(c, RectF(pv.left + half + 8 * dp, by, pv.right, by + bh), "BACK", true, a) { scr = drBack }
         val dir = SkinLibrary.dirs.firstOrNull()?.path ?: ""
-        small(c, if (drMsg.isNotEmpty()) drMsg else "IMPORT a .png / .brpack / .mcpack, or copy it to $dir", w / 2, h - 10 * dp, 9f, Color.rgb(200, 195, 160))
+        small(c, if (drMsg.isNotEmpty()) drMsg else "Packs (.brpack / .mcpack) are saved in $dir  ·  IMPORT a .png to wear it once", w / 2, h - 10 * dp, 9f, Color.rgb(200, 195, 160))
     }
 
     /** In-game buttons: small options icon (top-centre) and the walk / run toggle (bottom-right). */

@@ -92,7 +92,7 @@ fun main(argv: Array<String>) {
     fun startGame(addr: String = "", lv: Int = 0, load: SaveData? = null) {
         net?.close()
         val a = addr.trim()
-        net = if (a.isEmpty()) null else a.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start(); SkinLibrary.applyTo(it) } }
+        net = if (a.isEmpty()) null else a.split(":").let { p -> Net(p[0], p.getOrNull(1)?.toIntOrNull() ?: PORT).also { it.start() } }
         if (load != null) g.restore(load) else g.newGame(lv)
         slot = load?.id; playT = 0.0; levelsOpen = false; recenter = true
         playing = true; scr = Scr.GAME; setCursor(true)
@@ -106,8 +106,8 @@ fun main(argv: Array<String>) {
         val fc = JFileChooser(); fc.isMultiSelectionEnabled = true
         fc.fileFilter = javax.swing.filechooser.FileNameExtensionFilter("Skins and skin packs (*.png, *.brpack, *.mcpack)", "png", "brpack", "mcpack")
         if (fc.showOpenDialog(panel) == JFileChooser.APPROVE_OPTION) {
-            val ok = fc.selectedFiles.count { f -> runCatching { f.inputStream().use { SkinLibrary.import(f.name, it) } }.getOrNull() != null }
-            drMsg = if (ok > 0) Tf("Imported %d file(s)", ok) else "Nothing imported: not a valid skin or skin pack"
+            val last = fc.selectedFiles.mapNotNull { f -> runCatching { f.inputStream().use { SkinLibrary.import(f.name, it) } }.getOrNull() }.lastOrNull()
+            drMsg = if (last == null) "Nothing imported: not a valid skin or skin pack" else if (last.kind == "pack") Tf("Imported pack %s (%d skin(s))", last.label, last.skins) else Tf("External skin: %s", last.label)
         }
     }
     fun openSkinFolder() { runCatching { SkinLibrary.dirs.firstOrNull()?.let { it.mkdirs(); Desktop.getDesktop().open(it) } }.onFailure { drMsg = "Folder: " + (SkinLibrary.dirs.firstOrNull()?.path ?: "?") } }
@@ -228,12 +228,18 @@ fun main(argv: Array<String>) {
             dim(g2, 210, 190)
             heading(g2, "DRESSING ROOM", ac, 0.15)
             val list = Rectangle((w * 0.07).toInt(), (hh * 0.24).toInt(), (w * 0.46).toInt(), (hh * 0.60).toInt())
-            val rh = hh / 11; val gp = hh / 90; val skins = SkinLibrary.entries; val sel = SkinLibrary.selectedId
-            scrollY = scrollY.coerceIn(0, max(0, skins.size * (rh + gp) - list.height))
+            val rh = hh / 11; val gp = hh / 90; val hdr = hh / 24; val rows = SkinLibrary.rows(); val sel = SkinLibrary.selectedId
+            scrollY = scrollY.coerceIn(0, max(0, rows.sumOf { (if (it.entry == null) hdr else rh) + gp } - list.height))
             var hover: SkinEntry? = null
             val oldClip = g2.clip; g2.clip = list
-            for ((k, e) in skins.withIndex()) {
-                val rc = Rectangle(list.x, list.y + k * (rh + gp) - scrollY, list.width, rh)
+            var yy = list.y - scrollY
+            for (row in rows) {
+                val e = row.entry
+                if (e == null) { // title of a skin pack
+                    txt(g2, row.header.orEmpty().uppercase() + "  ·  " + Tf("%d skin(s)", row.count), list.x + 4, yy + hdr - 4, spaced(Font("SansSerif", Font.BOLD, hh / 62), 0.2f), ac, false)
+                    yy += hdr + gp; continue
+                }
+                val rc = Rectangle(list.x, yy, list.width, rh); yy += rh + gp
                 if (rc.y + rc.height < list.y || rc.y > list.y + list.height) continue
                 val on = e.id == sel
                 g2.color = Color(0, 0, 0, 175); g2.fillRoundRect(rc.x, rc.y, rc.width, rc.height, 14, 14)
@@ -243,7 +249,7 @@ fun main(argv: Array<String>) {
                 txt(g2, e.name, rc.x + 16, rc.y + rc.height * 45 / 100, Font("Serif", Font.BOLD, hh / 34), Color.WHITE, false)
                 txt(g2, e.source, rc.x + 16, rc.y + rc.height - 10, spaced(Font("SansSerif", Font.BOLD, hh / 70), 0.12f), Color(190, 185, 160), false)
                 if (on) txt(g2, "WEARING", rc.x + rc.width - 16 - g2.getFontMetrics(spaced(Font("SansSerif", Font.BOLD, hh / 60), 0.2f)).stringWidth("WEARING"), rc.y + rc.height * 45 / 100, spaced(Font("SansSerif", Font.BOLD, hh / 60), 0.2f), ac, false)
-                hitClip(rc, list) { SkinLibrary.select(e, net) }
+                hitClip(rc, list) { SkinLibrary.select(e) }
             }
             g2.clip = oldClip
             val pv = Rectangle((w * 0.60).toInt(), list.y, (w * 0.33).toInt(), (hh * 0.44).toInt())
@@ -257,7 +263,7 @@ fun main(argv: Array<String>) {
             btn(g2, Rectangle(pv.x + bw / 2 + gap / 2, y, bw / 2 - gap / 2, bh), "FOLDER", false, ac) { openSkinFolder() }; y += bh + gap
             btn(g2, Rectangle(pv.x, y, bw, bh), "BACK", true, ac) { scr = drBack }
             val dir = SkinLibrary.dirs.firstOrNull()?.path ?: ""
-            txt(g2, if (drMsg.isNotEmpty()) drMsg else "Put .png or .brpack / .mcpack files in $dir", w / 2, hh - hh / 24, Font("SansSerif", Font.PLAIN, hh / 56), Color(200, 195, 160))
+            txt(g2, if (drMsg.isNotEmpty()) drMsg else "Skin packs (.brpack / .mcpack) are saved in $dir  ·  IMPORT a .png to wear it once", w / 2, hh - hh / 24, Font("SansSerif", Font.PLAIN, hh / 56), Color(200, 195, 160))
         }
 
         /** Side drawer with the unlocked levels; the arrow tab on the left edge opens it. */

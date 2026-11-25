@@ -28,7 +28,13 @@ class Net(private val host: String, private val port: Int = PORT) {
     @Volatile var state = 0 // 0 connecting, 1 online, 2 failed/lost
     @Volatile private var seed: Int? = null
     private var seedTaken = false
-    @Volatile private var customSkinPng: ByteArray? = null
+    @Volatile private var customSkinPng: ByteArray? = SkinLibrary.selected().png?.copyOf()  // the skin worn when the connection is made
+
+    // Skin change hook: every change in SkinLibrary (Dressing Room pick, new external skin...) is pushed to the server from a worker thread
+    // (never from the UI thread: Android refuses network writes there). Ordered, so the last choice wins.
+    private val skinSender = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "backrooms-skin-send").apply { isDaemon = true } }
+    private val skinHook: (SkinEntry) -> Unit = { e -> runCatching { skinSender.execute { runCatching { setCustomSkin(e.png) } } } }
+    init { SkinLibrary.addChangeListener(skinHook) }
     @Volatile private var out: PrintWriter? = null
     @Volatile private var sock: Socket? = null
     private val writeLock = Any()
@@ -132,6 +138,7 @@ class Net(private val host: String, private val port: Int = PORT) {
     private fun sendLine(line: String) { synchronized(writeLock) { out?.println(line) } }
     fun send(x: Double, y: Double, lv: Int) { if (id != 0) sendLine("P $id $x $y $lv") }
     fun close() {
+        SkinLibrary.removeChangeListener(skinHook); skinSender.shutdown()
         try { sock?.close() } catch (_: IOException) {}
         others.clear(); playerSkins.clear(); pendingSkins.clear()
     }
