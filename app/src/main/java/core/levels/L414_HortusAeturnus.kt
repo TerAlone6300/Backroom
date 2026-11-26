@@ -196,48 +196,96 @@ object Hortus : OpenWorld {
         arrayOf(intArrayOf(226, 60, 110), intArrayOf(240, 100, 150), intArrayOf(250, 160, 190), intArrayOf(200, 40, 80)),      // bougainvillea
         arrayOf(intArrayOf(250, 222, 70), intArrayOf(255, 255, 240), intArrayOf(246, 170, 60), intArrayOf(250, 240, 160)),     // sunny
         arrayOf(intArrayOf(160, 112, 214), intArrayOf(200, 170, 240), intArrayOf(255, 255, 255), intArrayOf(120, 90, 200)))    // lavender
-    private fun grass(wx: Double, wy: Double, n: Double, r: Int = 64, g: Int = 148, b: Int = 58) = col(r, g, b, n, 0.78 + 0.4 * h((wx * 2).toInt(), (wy * 2).toInt(), 4162))
-    private fun flowers(wx: Double, wy: Double, n: Double, pal: Int, density: Double, gr: Int = 64, gg: Int = 148, gb: Int = 58): Int {
-        val fx = floor(wx * 14).toInt(); val fy = floor(wy * 14).toInt()
-        if (h(fx, fy, 4160) < density) {
-            val cx = wx * 14 - fx - 0.5; val cy = wy * 14 - fy - 0.5
-            if (cx * cx + cy * cy < 0.16) { val c = PALETTES[pal][(h(fx, fy, 4161) * 4).toInt().coerceIn(0, 3)]; return col(c[0], c[1], c[2], n, 0.9 + 0.2 * (1 - 2 * hypot(cx, cy))) }
-        }
-        return grass(wx, wy, n, gr, gg, gb)
+    private const val SX = 0.7071; private const val SY = 0.7071   // world direction towards the sun (azimuth 45 degrees, see [sun])
+    private fun fbm(x: Double, y: Double, s: Int) = 0.55 * valueNoise(x, y, s) + 0.30 * valueNoise(x * 2.1 + 7.3, y * 2.1 + 3.1, s + 1) + 0.15 * valueNoise(x * 4.3 + 1.7, y * 4.3 + 9.2, s + 2)
+    private fun mulc(c: Int, f: Double) = pack((((c shr 16) and 255) * f).toInt(), (((c shr 8) and 255) * f).toInt(), ((c and 255) * f).toInt())
+
+    /** Grass: big soft patches of fresher and drier green, fine blades that run along y, and blade tips that catch the sun. `far` skips the sub-pixel detail. */
+    private fun grass(wx: Double, wy: Double, n: Double, r: Int = 56, g: Int = 126, b: Int = 48, far: Boolean = false): Int {
+        val macro = valueNoise(wx * 0.14, wy * 0.14, 4170); val meso = valueNoise(wx * 1.1, wy * 1.1, 4171)
+        val blade = if (far) 0.5 else h((wx * 64).toInt(), (wy * 14).toInt(), 4172); val fine = if (far) 0.5 else h((wx * 110).toInt(), (wy * 110).toInt(), 4173)
+        val f = 0.66 + 0.24 * macro + 0.15 * meso + 0.15 * blade + 0.10 * fine
+        val dry = (1.0 - macro) * 0.5; val tip = if (blade > 0.9) 0.16 else 0.0
+        return col((r + 40 * dry + 50 * tip).toInt(), (g + 12 * dry + 44 * tip).toInt(), (b - 12 * dry + 6 * tip).toInt(), n, f)
     }
-    /** Heads of tiny florets about 0.2 across with greenery between, like hydrangeas and bougainvillea. */
-    private fun clusters(wx: Double, wy: Double, n: Double, pal: Int, density: Double, gr: Int = 64, gg: Int = 148, gb: Int = 58): Int {
+    /** Flower beds: low-frequency noise gathers the flowers into drifts, with clear meadow between. */
+    private fun bed(wx: Double, wy: Double, seed: Int) = ((valueNoise(wx * 0.33, wy * 0.33, seed) - 0.3) / 0.4).coerceIn(0.0, 1.0)
+    /** Single flowers with five petals, a yellow eye and a soft shadow on the side away from the sun. */
+    private fun flowers(wx: Double, wy: Double, n: Double, pal: Int, density: Double, far: Boolean = false): Int {
+        val k = 12.0; val fx = floor(wx * k).toInt(); val fy = floor(wy * k).toInt()
+        if (h(fx, fy, 4160) >= density * (0.35 + 1.3 * bed(wx, wy, 4179))) return grass(wx, wy, n, far = far)
+        val cx = wx * k - fx - 0.5 - (h(fx, fy, 4174) - 0.5) * 0.3; val cy = wy * k - fy - 0.5 - (h(fx, fy, 4175) - 0.5) * 0.3
+        val rr = hypot(cx, cy); val pr = 0.30 + 0.11 * cos(5 * atan2(cy, cx) + h(fx, fy, 4176) * 6.28)
+        if (rr < pr) {
+            if (rr < 0.085) return col(252, 200, 56, n, 0.9 + 0.2 * h(fx, fy, 4177))
+            val c = PALETTES[pal][(h(fx, fy, 4161) * 4).toInt().coerceIn(0, 3)]
+            return col(c[0], c[1], c[2], n, 0.80 + 0.18 * (rr / pr) + 0.14 * ((cx * SX + cy * SY) / max(rr, 0.001)))
+        }
+        val bg = grass(wx, wy, n, far = far)
+        return if (rr < pr + 0.13 && cx * SX + cy * SY < 0) mulc(bg, 0.74) else bg
+    }
+    /** Heads of tiny florets (hydrangea, bougainvillea): irregular domes in drifts, lit from the sun's side, with a leafy fringe and soft gaps between the florets. */
+    private fun clusters(wx: Double, wy: Double, n: Double, pal: Int, density: Double, gr: Int = 56, gg: Int = 126, gb: Int = 48, far: Boolean = false): Int {
         val hx = floor(wx * 4).toInt(); val hy = floor(wy * 4).toInt()
-        if (h(hx, hy, 4165) < density) {
-            val cx = wx * 4 - hx - 0.5 - (h(hx, hy, 4166) - 0.5) * 0.3; val cy = wy * 4 - hy - 0.5 - (h(hx, hy, 4167) - 0.5) * 0.3
-            if (cx * cx + cy * cy < 0.17) { val c = PALETTES[pal][(h(hx, hy, 4161) * 4).toInt().coerceIn(0, 3)]
-                return col(c[0], c[1], c[2], n, (0.7 + 0.5 * h(floor(wx * 30).toInt(), floor(wy * 30).toInt(), 4168)) * (1.0 - 0.5 * hypot(cx, cy))) }
-        }
-        return grass(wx, wy, n, gr, gg, gb)
+        if (h(hx, hy, 4165) >= density * (0.5 + 1.0 * bed(wx, wy, 4177)).coerceAtMost(1.0)) return grass(wx, wy, n, gr, gg, gb, far)
+        val size = 0.3 + 0.2 * h(hx, hy, 4169)
+        val cx = (wx * 4 - hx - 0.5 - (h(hx, hy, 4166) - 0.5) * 0.3) / size; val cy = (wy * 4 - hy - 0.5 - (h(hx, hy, 4167) - 0.5) * 0.3) / size
+        val ang = atan2(cy, cx); val r2 = (cx * cx + cy * cy) * (1.0 + 0.3 * sin(3 * ang + h(hx, hy, 4171) * 6.28) + 0.15 * sin(5 * ang + h(hx, hy, 4172) * 6.28))
+        if (r2 >= 1.45) return grass(wx, wy, n, gr, gg, gb, far)
+        if (r2 >= 1.0) return col(30, 80, 34, n, 0.8 + 0.4 * h((wx * 40).toInt(), (wy * 40).toInt(), 4173))     // a fringe of leaves round the head
+        val dome = sqrt(1.0 - r2); val light = (0.55 + 0.5 * (cx * SX * 0.5 + cy * SY * 0.5 + dome * 0.7)).coerceIn(0.3, 1.25)
+        val base = PALETTES[pal][(h(hx, hy, 4161) * 4).toInt().coerceIn(0, 3)]
+        if (far) return col(base[0], base[1], base[2], n, light * (0.82 + 0.3 * h((wx * 9).toInt(), (wy * 9).toInt(), 4169)))
+        val fx = floor(wx * 24).toInt(); val fy = floor(wy * 24).toInt(); val lx = wx * 24 - fx - 0.5; val ly = wy * 24 - fy - 0.5
+        val fr = hypot(lx, ly)
+        val alt = PALETTES[pal][(((h(hx, hy, 4161) * 4).toInt() + (if (h(fx, fy, 4178) > 0.7) 1 else 0)) % 4).coerceIn(0, 3)]
+        val f = light * (0.72 + 0.42 * h(fx, fy, 4168))
+        if (fr > 0.5) return col(alt[0], alt[1], alt[2], n, f * 0.5)                         // the shaded gap between two florets
+        if (fr < 0.07) return col(236, 226, 170, n, light)
+        return col(alt[0], alt[1], alt[2], n, f * (1.12 - 0.4 * fr))
     }
-    private fun slabs(wx: Double, wy: Double, n: Double, size: Double, r: Int, g: Int, b: Int): Int {
+    /** Paving: moss in the joints, bevelled edges (lit on the sun's side), grain, hairline cracks and a different tone for every stone. */
+    private fun slabs(wx: Double, wy: Double, n: Double, size: Double, r: Int, g: Int, b: Int, far: Boolean = false): Int {
         val sx = floor(wx / size).toInt(); val sy = floor(wy / size).toInt(); val fx = wx / size - sx; val fy = wy / size - sy
-        if (fx < 0.06 || fy < 0.06) return col(r - 50, g - 48, b - 44, n, 0.8)
-        return col(r, g, b, n, 0.85 + 0.3 * h(sx, sy, 4163))
+        val mw = 0.018 / size; val bw = 0.05 / size
+        if (fx < mw || fy < mw) { val moss = if (far) 0.4 else fbm(wx * 9, wy * 9, 4182); return if (moss > 0.5) col(58, 92, 40, n, 0.7 + 0.5 * moss) else col(r / 3, g / 3, b / 3, n, 0.8 + 0.4 * (if (far) 0.5 else h((wx * 80).toInt(), (wy * 80).toInt(), 4183))) }
+        var f = 0.86 + 0.26 * h(sx, sy, 4163)
+        if (!far) f += 0.10 * (fbm(wx * 14, wy * 14, 4184) - 0.5) + 0.07 * (h((wx * 90).toInt(), (wy * 90).toInt(), 4185) - 0.5)
+        if (fx > 1 - bw) f += 0.20 else if (fx < mw + bw) f -= 0.16
+        if (fy > 1 - bw) f += 0.20 else if (fy < mw + bw) f -= 0.16
+        if (!far) {
+            val crack = abs(fbm(wx * 5 + sx * 3.1, wy * 5 + sy * 2.3, 4186) - 0.5); if (crack < 0.012) f -= 0.3
+            val lichen = fbm(wx * 4, wy * 4, 4187); if (lichen > 0.66) return col((r * 0.8).toInt(), (g * 0.95).toInt(), (b * 0.7).toInt(), n, f * 0.9)
+        }
+        return col(r, g, b, n, f)
+    }
+    private fun water(wx: Double, wy: Double, n: Double): Int {
+        val rip = sin(wx * 5.2 + sin(wy * 3.1) * 1.3) + 0.8 * sin(wy * 6.3 + wx * 1.7) + 0.4 * sin((wx + wy) * 9.1)
+        val spec = max(0.0, rip * 0.3 + 0.55).pow(14.0)
+        val deep = 0.5 + 0.5 * valueNoise(wx * 0.6, wy * 0.6, 4188)
+        return col((34 + 40 * deep + 190 * spec).toInt(), (104 + 56 * deep + 180 * spec).toInt(), (142 + 50 * deep + 150 * spec).toInt(), n, 0.86 + 0.1 * rip * 0.3)
     }
 
-    override fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int {
+    override fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int = groundAt(wx, wy, ix, iy, base, false)
+    override fun groundFar(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int = groundAt(wx, wy, ix, iy, base, true)
+    private fun groundAt(wx: Double, wy: Double, ix: Int, iy: Int, base: Int, far: Boolean): Int {
         val n = 0.85 + 0.3 * ((base and 255) / 255.0)
         val p = path
-        if (p != null && p.has(ix, iy)) return slabs(wx, wy, n, 0.55, 196, 190, 176)             // the way out: flagstones
+        if (p != null && p.has(ix, iy)) return slabs(wx, wy, n, 0.55, 196, 190, 176, far)         // the way out: flagstones
         val z = zoneAt(ix, iy); val pal = z shr 8
         return when (z and 255) {
-            Z_STREET -> slabs(wx, wy, n, 0.25, 150, 138, 120)
-            Z_CASTLE -> slabs(wx, wy, n, 0.5, 164, 160, 152)
-            Z_ROCKY -> col(112, 112, 98, n, 0.85 + 0.3 * h((wx * 3).toInt(), (wy * 3).toInt(), 4150))
-            Z_TUNNEL -> slabs(wx, wy, n, 0.6, 150, 150, 142)
-            Z_GREEN -> if (pal == 1) clusters(wx, wy, n, 1, 0.6, 90, 70, 50) else slabs(wx, wy, n, 0.5, 120, 92, 70)
-            Z_DOME -> slabs(wx, wy, n, 0.7, 200, 214, 206)
-            Z_POOL -> col(70, 150, 200, n, 0.85 + 0.2 * sin(wx * 4 + wy * 3))
-            Z_VALLEY -> clusters(wx, wy, n, pal, 0.72)
-            Z_GARDEN -> clusters(wx, wy, n, pal, 0.22)
-            Z_FOREST -> col(50, 98, 48, n, 0.7 + 0.5 * h((wx * 3).toInt(), (wy * 3).toInt(), 4164))
-            else -> flowers(wx, wy, n, 2, 0.025)
+            Z_STREET -> slabs(wx, wy, n, 0.25, 150, 138, 120, far)
+            Z_CASTLE -> slabs(wx, wy, n, 0.5, 164, 160, 152, far)
+            Z_ROCKY -> { val f = if (far) 0.9 else 0.72 + 0.5 * fbm(wx * 6, wy * 6, 4150) + 0.15 * h((wx * 40).toInt(), (wy * 40).toInt(), 4151); if (!far && abs(fbm(wx * 2.5, wy * 2.5, 4152) - 0.5) < 0.02) col(60, 58, 52, n, 1.0) else col(118, 116, 102, n, f) }
+            Z_TUNNEL -> slabs(wx, wy, n, 0.6, 150, 150, 142, far)
+            Z_GREEN -> if (pal == 1) clusters(wx, wy, n, 1, 0.6, 90, 70, 50, far) else slabs(wx, wy, n, 0.5, 120, 92, 70, far)
+            Z_DOME -> slabs(wx, wy, n, 0.7, 200, 214, 206, far)
+            Z_POOL -> water(wx, wy, n)
+            Z_VALLEY -> clusters(wx, wy, n, pal, 0.8, far = far)
+            Z_GARDEN -> clusters(wx, wy, n, pal, 0.5, far = far)
+            Z_FOREST -> { val dap = valueNoise(wx * 1.6, wy * 1.6, 4180); val lit = if (dap > 0.6) 0.55 + 1.4 * (dap - 0.6) else 0.0   // dappled sun through the canopy
+                col((46 + 70 * lit).toInt(), (92 + 80 * lit).toInt(), (44 + 30 * lit).toInt(), n, 0.62 + 0.55 * (if (far) 0.5 else fbm(wx * 5, wy * 5, 4164)) + 0.2 * (if (far) 0.5 else h((wx * 30).toInt(), (wy * 30).toInt(), 4189))) }
+            else -> flowers(wx, wy, n, (h(ix shr 3, iy shr 3, 4190) * 4).toInt().coerceIn(0, 3), 0.045, far)
         }
     }
 
@@ -274,13 +322,53 @@ object Hortus : OpenWorld {
     // ---- wall textures (64 x 64) ----
     private fun tex(f: (Int, Int) -> Int) = IntArray(4096) { f(it % 64, it / 64) }
     private fun rgb(r: Double, g: Double, b: Double, f: Double = 1.0) = pack((r * f).toInt().coerceIn(0, 255), (g * f).toInt().coerceIn(0, 255), (b * f).toInt().coerceIn(0, 255))
-    private fun blossoms(s: Int, base: (Int, Int) -> Int, p: Array<IntArray>, dens: Double) = tex { x, y -> if (h(x / 2, y / 2, s) < dens) { val c = p[(h(x / 2, y / 2, s + 1) * p.size).toInt().coerceIn(0, p.size - 1)]; rgb(c[0].toDouble(), c[1].toDouble(), c[2].toDouble(), 0.85 + 0.3 * h(x, y, s + 2)) } else base(x, y) }
-    private fun leaves(s: Int) = { x: Int, y: Int -> val f = 0.55 + 0.9 * h(x, y, s); if (h(x, y, s + 1) > 0.86) rgb(110.0, 178.0, 74.0, f) else rgb(36.0, 104.0, 46.0, f) }
+    /** Flowers on a hedge: every 8x8 cell may hold one round bloom (a lit centre, shaded rim); the rest is leaf. Tiles seamlessly. */
+    private fun blossoms(s: Int, base: (Int, Int) -> Int, p: Array<IntArray>, dens: Double) = tex { x, y ->
+        var best = 99.0; var bid = 0; var bdx = 0.0; var bdy = 0.0
+        val cx0 = x / 8; val cy0 = y / 8
+        for (j in -1..1) for (i in -1..1) {
+            val ci = Math.floorMod(cx0 + i, 8); val cj = Math.floorMod(cy0 + j, 8)
+            if (h(ci, cj, s) >= dens) continue
+            val lx = (cx0 + i) * 8 + 2.5 + 3.0 * h(ci, cj, s + 1); val ly = (cy0 + j) * 8 + 2.5 + 3.0 * h(ci, cj, s + 2)
+            val dx = x + 0.5 - lx; val dy = y + 0.5 - ly; val dd = hypot(dx, dy)
+            if (dd < best) { best = dd; bid = cj * 8 + ci; bdx = dx; bdy = dy }
+        }
+        val rad = 2.9
+        if (best < rad) { val c = p[(h(bid % 8, bid / 8, s + 3) * p.size).toInt().coerceIn(0, p.size - 1)]; val t = best / rad
+            val f = (1.12 - 0.42 * t - 0.2 * ((bdx * 0.6 + bdy * 0.8) / rad)).coerceIn(0.45, 1.35)
+            if (best < 0.8) rgb(c[0] * 0.6 + 100.0, c[1] * 0.6 + 100.0, c[2] * 0.4 + 40.0, 1.0) else rgb(c[0].toDouble(), c[1].toDouble(), c[2].toDouble(), f) }
+        else base(x, y)
+    }
+    /** Leaves: every 8x8 cell holds one leaf; leaves facing the sun (up-left) are bright, the gaps between them dark. Tiles seamlessly. */
+    private fun leaves(s: Int) = { x: Int, y: Int ->
+        var best = 99.0; var bid = 0; var bdx = 0.0; var bdy = 0.0
+        val cx0 = x / 8; val cy0 = y / 8
+        for (j in -1..1) for (i in -1..1) {
+            val ci = Math.floorMod(cx0 + i, 8); val cj = Math.floorMod(cy0 + j, 8)
+            val lx = (cx0 + i) * 8 + 2.0 + 4.0 * h(ci, cj, s); val ly = (cy0 + j) * 8 + 2.0 + 4.0 * h(ci, cj, s + 1)
+            val dx = x + 0.5 - lx; val dy = y + 0.5 - ly; val dd = hypot(dx * 0.82, dy * 1.12)
+            if (dd < best) { best = dd; bid = cj * 8 + ci; bdx = dx; bdy = dy }
+        }
+        val id = h(bid % 8, bid / 8, s + 2)
+        if (best > 3.4) rgb(12.0, 40.0, 18.0, 0.8 + 0.5 * h(x, y, s + 3))
+        else { val t = best / 3.4; val lightSide = (-(bdx * 0.6 + bdy * 0.8)) / 3.4
+            val f = (1.05 - 0.45 * t + 0.34 * lightSide + 0.2 * (h(x, y, s + 4) - 0.5)).coerceIn(0.35, 1.5)
+            if (abs(bdx * 0.8 - bdy * 0.6) < 0.4 && t < 0.85) rgb(60.0, 120.0, 52.0, f)                     // midrib
+            else if (id > 0.82) rgb(112.0, 182.0, 70.0, f) else if (id > 0.4) rgb(52.0, 128.0, 54.0, f) else rgb(34.0, 100.0, 46.0, f) }
+    }
+    /** Cheap bump mapping: the height of each texel is its brightness; texels whose upper-left neighbours are higher get lit, the others shaded. */
+    private fun emboss(t: IntArray, k: Double): IntArray {
+        fun lum(x: Int, y: Int): Double { val c = t[(y and 63) * 64 + (x and 63)]; return (0.3 * ((c shr 16) and 255) + 0.59 * ((c shr 8) and 255) + 0.11 * (c and 255)) / 255.0 }
+        return IntArray(4096) { i -> val x = i % 64; val y = i / 64; val c = t[i]
+            if ((c ushr 24) == 0xFE) c else { val sh = (1.0 + k * ((lum(x - 1, y) - lum(x + 1, y)) * 0.7 + (lum(x, y - 1) - lum(x, y + 1)) * 0.7)).coerceIn(0.55, 1.5)
+                pack((((c shr 16) and 255) * sh).toInt(), (((c shr 8) and 255) * sh).toInt(), ((c and 255) * sh).toInt()) } }
+    }
+    private fun bake(a: Array<IntArray>) = Array(a.size) { i -> when (i) { 0 -> emboss(a[i], 1.5); 1, 2 -> emboss(a[i], 1.0); 3, 4 -> emboss(a[i], 0.45); 7 -> emboss(a[i], 1.3); 9, 10 -> emboss(a[i], 1.1); 11 -> emboss(a[i], 1.6); else -> a[i] } }
     private fun ashlar(s: Int, w: Boolean) = tex { x, y -> val row = y / 13; val xo = (x + (row and 1) * 16) % 32
         if (y % 13 == 0 || xo == 0) rgb(166.0, 156.0, 136.0) else { val f = 0.88 + 0.2 * h(xo / 32 + row * 7, row, s) * 0.5 + 0.12 * h(x, y, s + 1)
             if (w && x in 28..35 && y in 16..46 && (y > 22 || abs(x - 31.5) < 3.5 + (y - 16) * 0.5)) rgb(42.0, 42.0, 56.0) else rgb(226.0, 216.0, 192.0, f) } }
 
-    override val tex: Array<IntArray> by lazy { arrayOf(
+    override val tex: Array<IntArray> by lazy { bake(arrayOf(
         tex { x, y -> val f = 0.55 + 0.6 * h(x / 2, y / 16, 4300) * (if (x % 9 == 0) 0.6 else 1.0); rgb(96.0, 68.0, 46.0, f) },                                          // 0 bark
         tex { x, y -> val f = 0.5 + 0.9 * h(x / 3, y / 3, 4301); if (h(x, y, 4302) < 0.02) rgb(255.0, 205.0, 225.0) else if (h(x, y, 4303) > 0.88) rgb(120.0, 190.0, 80.0, f) else rgb(44.0, 118.0, 52.0, f) }, // 1 foliage
         tex(leaves(4304)),                                                                                                                                              // 2 hedge
@@ -295,28 +383,79 @@ object Hortus : OpenWorld {
         ashlar(4315, false), ashlar(4316, true),                                                                                                                         // 9, 10 castle
         tex { x, y -> val m = h(x / 6, y / 6, 4317); if (m > 0.62) rgb(84.0, 130.0, 64.0, 0.8 + 0.4 * h(x, y, 4318)) else rgb(124.0, 120.0, 110.0, 0.75 + 0.5 * h(x, y, 4319)) }, // 11 mossy rock
         tex { x, y -> rgb(196.0, 228.0, 242.0, 0.75 + 0.5 * h(x / 2, y / 20, 4320)) },                                                                                    // 12 waterfall
-        tex { x, y -> if (x % 16 < 2 || y % 32 < 2 || (x + y) % 16 < 2) rgb(236.0, 240.0, 236.0) else rgb(150.0, 206.0, 228.0, 0.88 + 0.24 * h(x / 8, y / 8, 4321)) }) }  // 13 glass dome
+        tex { x, y -> if (x % 16 < 2 || y % 32 < 2 || (x + y) % 16 < 2) rgb(236.0, 240.0, 236.0) else rgb(150.0, 206.0, 228.0, 0.88 + 0.24 * h(x / 8, y / 8, 4321)) })) }  // 13 glass dome
 
-    /** 2048 x 256 spring sky: azimuth around, 0 at the horizon up to the zenith. Clouds, the sun, far mountains and a forest line. */
+    override val skyW = 4096
+    override val skyH = 512
+    override val sun = Sun(PI / 4, Math.toRadians(35.0), pack(255, 238, 205), shafts = 0.3, dust = 1.0)
+
+    /** 4096 x 512 spring sky: azimuth around, 0 at the horizon up to the zenith. Sun-lit clouds, the sun, layers of far mountains with snow, a forest line. */
     override val sky: IntArray by lazy {
-        val w = 2048; val hh = 256; val s = IntArray(w * hh)
+        val w = skyW; val hh = skyH; val s = IntArray(w * hh)
+        val sunU = w / 8.0; val sunEl = Math.toRadians(35.0); val sunV = sunEl / (PI / 2) * (hh - 1)
         fun lerp(a: Int, b: Int, t: Double) = (a + (b - a) * t).toInt()
-        for (v in 0 until hh) { val e = v / 255.0; val k = e.pow(0.55)
+        // clouds live on a flat layer high up: sky pixels are projected onto it, so they bunch up and shrink towards the horizon (perspective)
+        fun cloudN(x: Double, y: Double) = 0.50 * valueNoise(x, y, 4190) + 0.27 * valueNoise(x * 2.03 + 5.2, y * 2.03 + 1.3, 4191) + 0.15 * valueNoise(x * 4.1 + 9.7, y * 4.1 + 3.3, 4192) + 0.08 * valueNoise(x * 8.3 + 2.1, y * 8.3 + 7.9, 4193)
+        fun smooth(e0: Double, e1: Double, x: Double): Double { val t = ((x - e0) / (e1 - e0)).coerceIn(0.0, 1.0); return t * t * (3 - 2 * t) }
+        val sunAz = PI / 4
+        java.util.stream.IntStream.range(0, hh).parallel().forEach { v ->
+            val e = v / (hh - 1.0); val k = e.pow(0.5); val elev = (v + 0.5) / hh * (PI / 2)
+            val dist = 1.0 / (tan(elev) + 0.05)
             for (u in 0 until w) {
-                var r = lerp(200, 62, k); var g = lerp(230, 128, k); var b = lerp(246, 224, k)
-                val cn = 0.6 * valueNoise(u / 146.29, v / 26.0, 4190, 14) + 0.4 * valueNoise(u / 60.235, v / 12.0, 4191, 34)
-                val ca = ((cn - 0.52) / 0.26).coerceIn(0.0, 1.0) * (0.95 - 0.45 * e)
-                if (ca > 0) { val sh = 255 - 30 * (1 - ca); r = lerp(r, sh.toInt(), ca); g = lerp(g, sh.toInt(), ca); b = lerp(b, (sh + 2).toInt().coerceAtMost(255), ca) }
-                val dd = hypot((u - 256) / 5.69, (v - 99) / 2.84)   // the sun, 45 degrees round and 35 up
-                if (dd < 2.6) { r = 255; g = 252; b = 236 } else { val gl = 0.55 * exp(-dd / 9.0); r = min(255, r + (60 * gl).toInt()); g = min(255, g + (52 * gl).toInt()); b = min(255, b + (30 * gl).toInt()) }
-                s[v * w + u] = pack(r, g, b) } }
-        for (u in 0 until w) { // far mountains with snow, then the forest line
-            val range = valueNoise(u / 146.29, 0.7, 4192, 14); val peak = valueNoise(u / 36.57, 0.5, 4194, 56)
-            val mh = (6 + 24 * range + 18 * peak * range).toInt()   // the range rises in jagged peaks
-            for (v in 0 until mh) { val t = v / mh.toDouble(); val rock = 0.9 + 0.2 * h(u / 3, v / 2, 4195)
-                s[v * w + u] = if (t > 0.8 && peak > 0.5 && mh > 24) pack(236, 240, 250) else pack((lerp(112, 150, t) * rock).toInt(), (lerp(136, 170, t) * rock).toInt(), (lerp(174, 200, t) * rock).toInt()) }
-            val fh = (3 + 8 * valueNoise(u / 40.96, 1.3, 4193, 50)).toInt()
-            for (v in 0 until fh) s[v * w + u] = pack(lerp(52, 76, v / fh.toDouble()), lerp(104, 138, v / fh.toDouble()), lerp(64, 84, v / fh.toDouble())) }
+                var r = lerp(206, 58, k).toDouble(); var g = lerp(228, 124, k).toDouble(); var b = lerp(244, 222, k).toDouble()
+                var du = u - sunU; if (du > w / 2) du -= w else if (du < -w / 2) du += w
+                val dd = hypot(du * (360.0 / w) * cos(sunEl), (v - sunV) * (90.0 / (hh - 1)))   // degrees from the sun
+                val az = u.toDouble() / w * 2 * PI
+                val cx = cos(az) * dist * 1.7; val cy = sin(az) * dist * 1.7
+                val cn = cloudN(cx, cy)
+                val cov = smooth(0.545, 0.655, cn) * (0.97 - 0.3 * e)
+                if (cov > 0.004) { // a cloud is darker where more cloud lies between it and the sun, brighter on the thin rim facing it
+                    val cs = cloudN(cx + cos(sunAz) * 0.22, cy + sin(sunAz) * 0.22)
+                    val lit = (0.12 + 0.88 * (1.0 - 5.0 * max(0.0, cs - cn))).coerceIn(0.0, 1.0)
+                    val rim = (cov * (1 - cov) * 4.0) * exp(-dd / 25.0)
+                    val cr = 142 + 113 * lit + 40 * rim; val cg = 160 + 91 * lit + 34 * rim; val cb = 192 + 52 * lit + 14 * rim
+                    r += (cr - r) * cov; g += (cg - g) * cov; b += (cb - b) * cov
+                }
+                if (dd < 1.3) { val core = smooth(1.3, 0.7, dd); r += (255 - r) * core; g += (252 - g) * core; b += (240 - b) * core }
+                val gl = 0.85 * exp(-dd / 5.0) + 0.38 * exp(-dd / 20.0) + 0.14 * exp(-dd / 70.0)
+                r += 95 * gl; g += 80 * gl; b += 46 * gl
+                s[v * w + u] = pack(r.toInt(), g.toInt(), b.toInt())
+            }
+        }
+        val hazeC = intArrayOf(206, 228, 240)
+        // three ranges, far to near: each is hazier the farther it is; the sunny slope of every peak is lit
+        val ranges = arrayOf(doubleArrayOf(4210.0, 24.0, 40.0, 0.62, 150.0, 172.0, 208.0), doubleArrayOf(4220.0, 14.0, 34.0, 0.34, 112.0, 142.0, 176.0), doubleArrayOf(4230.0, 8.0, 20.0, 0.10, 84.0, 118.0, 96.0))
+        for ((li, rg) in ranges.withIndex()) {
+            val seed = rg[0].toInt(); val hgt = IntArray(w); val frac = DoubleArray(w)
+            for (u in 0 until w) {
+                val big = 0.5 * valueNoise(u * 3.0 / w, 0.5, seed, 3) + 0.3 * valueNoise(u * 9.0 / w, 0.5, seed + 1, 9) + 0.2 * valueNoise(u * 27.0 / w, 0.5, seed + 2, 27)
+                val ridge = 1.0 - abs(2 * valueNoise(u * 40.0 / w, 0.5, seed + 3, 40) - 1)       // sharp crests
+                val fine = valueNoise(u * 160.0 / w, 0.5, seed + 4, 160)
+                val m = rg[1] + rg[2] * (0.35 * big + 0.55 * big * ridge) + 2.2 * fine * (if (li == 2) 1.0 else 0.4)
+                hgt[u] = m.toInt(); frac[u] = m - m.toInt()
+            }
+            for (u in 0 until w) {
+                val slope = (hgt[(u + w - 2) % w] - hgt[(u + 2) % w]).toDouble()                    // > 0: the slope faces right
+                var du = sunU - u; if (du > w / 2) du -= w else if (du < -w / 2) du += w
+                val sunny = (slope * (if (du > 0) 1 else -1) * 0.07).coerceIn(-0.28, 0.28)
+                for (v in 0..hgt[u]) {
+                    val t = v / (hgt[u] + 1.0); val rock = 0.88 + 0.26 * valueNoise(u * 220.0 / w, v * 0.09, seed + 5, 220)
+                    var r = rg[4] * rock * (0.92 + 0.12 * t) * (1 + sunny); var g = rg[5] * rock * (0.92 + 0.12 * t) * (1 + sunny); var b = rg[6] * rock * (0.94 + 0.1 * t) * (1 + sunny)
+                    if (li < 2) { val snow = ((v - (rg[1] + rg[2] * 0.55) - 5 * valueNoise(u * 60.0 / w, 0.3, seed + 6, 60)) / 6.0).coerceIn(0.0, 1.0)   // a snow line that follows the altitude, not the peak
+                        if (snow > 0) { r += (238.0 * (1 + sunny * 0.6) - r) * snow; g += (242.0 * (1 + sunny * 0.6) - g) * snow; b += (252.0 - b) * snow } }
+                    val hz = rg[3]; r += (hazeC[0] - r) * hz; g += (hazeC[1] - g) * hz; b += (hazeC[2] - b) * hz
+                    val under = s[v * w + u]; val a = if (v == hgt[u]) frac[u] else 1.0           // anti-aliased crest
+                    s[v * w + u] = pack(lerp((under shr 16) and 255, r.toInt(), a), lerp((under shr 8) and 255, g.toInt(), a), lerp(under and 255, b.toInt(), a))
+                }
+            }
+        }
+        for (u in 0 until w) { // the forest line: rounded crowns
+            val fh = (5 + 9 * valueNoise(u * 30.0 / w, 1.3, 4193, 30) + 5 * valueNoise(u * 190.0 / w, 2.1, 4196, 190)).toInt()
+            for (v in 0 until fh) { val t = v / fh.toDouble(); val leaf = 0.85 + 0.3 * h(u / 2, v / 2, 4197)
+                s[v * w + u] = pack((lerp(40, 82, t) * leaf).toInt(), (lerp(86, 140, t) * leaf).toInt(), (lerp(52, 78, t) * leaf).toInt()) }
+        }
+        for (v in 0 until 28) { val a = (1 - v / 28.0).pow(2) * 0.5 // thin haze lying on the horizon
+            for (u in 0 until w) { val c = s[v * w + u]; s[v * w + u] = pack(lerp((c shr 16) and 255, hazeC[0], a), lerp((c shr 8) and 255, hazeC[1], a), lerp(c and 255, hazeC[2], a)) } }
         s
     }
 }

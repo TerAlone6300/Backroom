@@ -45,6 +45,11 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     private val bands = Array(nt) { Lamps() }
     private val rowTmp = IntArray(W)
     private val colU = IntArray(W); private val rowV = IntArray(H) // city sky lookup: azimuth per column, elevation per row
+    // rich open worlds (a sun): fractional sky lookup for a smooth sky, haze colour per column, sun direction, light shafts + pollen
+    private val colUf = DoubleArray(W); private val rowVf = DoubleArray(H); private val hazeC = IntArray(W)
+    private var rich = false; private var sunDx = 0.0; private var sunDy = 0.0; private var sunEl = 0.0
+    private var skyW = 2048; private var skyH = 256
+    private val atmo = Atmosphere(W, H)
 
     /** body(band, from, to) over [0, n) in `nt` slices; the last slice runs on the calling thread. */
     /** Stops the worker threads. Call it when this Renderer is replaced (the frame size changed). */
@@ -77,22 +82,63 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     /** City rows: above the horizon the star sky (no ceiling), below it street, sidewalk, grass, hazing into the horizon glow. */
     private fun openRows(ow: OpenWorld, px: IntArray, lp: Lamps, r0: Int, r1: Int, hz: Int, vs: Double, ch: Double, fk: Double, gl: Double, t: Double,
                          x: Double, y: Double, dx: Double, dy: Double, plX: Double, plY: Double, d: LevelDef, ts: TexSet) {
-        val sky = ow.sky; val tn = d.tint; val roof = ow.roofed(floor(x).toInt(), floor(y).toInt())
+        val sky = ow.sky; val tn = d.tint; val roof = ow.roofed(floor(x).toInt(), floor(y).toInt()); val sw = skyW
         for (yy in r0 until r1) {
             val dr = yy - hz
-            if (dr <= 0) { if (roof) for (xx in 0 until W) px[yy * W + xx] = ow.roofColor else { val base = rowV[yy] * 2048; for (xx in 0 until W) px[yy * W + xx] = sky[base + colU[xx]] }; continue }
+            if (dr <= 0) {
+                if (roof) for (xx in 0 until W) px[yy * W + xx] = ow.roofColor
+                else if (rich) { val vf = rowVf[yy]; for (xx in 0 until W) px[yy * W + xx] = skyBil(sky, sw, skyH, colUf[xx], vf) } // smooth sky
+                else { val base = rowV[yy] * sw; for (xx in 0 until W) px[yy * W + xx] = sky[base + colU[xx]] }
+                continue
+            }
             val rd = ch * H * vs / dr // ch = camera height (0.5 = standing; higher on the waterfall)
             val fog = 1.0 / (1 + rd * rd * fk)
             val ha = ((1.0 - 1.0 / (1 + rd * rd * ow.hazeK * Settings.fogScale)) * 256).toInt() // distance haze
+            // far ground is sampled several times per pixel (the footprint of a pixel grows with distance), or flowers shimmer and crawl
+            val taps = if (!rich || rd < 2.5) 1 else if (rd < 6.0) 2 else 4
+            val fpx = plX * (2.0 / W) * rd * 0.3; val fpy = plY * (2.0 / W) * rd * 0.3; val qx = dx * rd / dr * 0.3; val qy = dy * rd / dr * 0.3
             for (xx in 0 until W) {
                 val cx = camX[xx]
                 val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
                 val ix = floor(wx).toInt(); val iy = floor(wy).toInt()
-                val tx = ((wx - ix) * 64).toInt() and 63; val ty = ((wy - iy) * 64).toInt() and 63
-                val lit = mul(ow.ground(wx, wy, ix, iy, ts.floor[ty * 64 + tx]), lightAt(d, lp, wx, wy, t) * gl * fog * 0.95 * ow.dim(ix, iy), tn)
-                px[yy * W + xx] = if (ha > 0) blend(lit, ow.haze, ha) else lit
+                val gc = when (taps) {
+                    1 -> { val tx = ((wx - ix) * 64).toInt() and 63; val ty = ((wy - iy) * 64).toInt() and 63; val tb = ts.floor[ty * 64 + tx]; if (rich) ow.ground(wx, wy, ix, iy, tb) else ow.groundFar(wx, wy, ix, iy, tb) } // Low quality: the cheaper ground
+                    2 -> avg(gSample(ow, ts, wx + fpx + qx, wy + fpy + qy), gSample(ow, ts, wx - fpx - qx, wy - fpy - qy))
+                    else -> avg(avg(gSample(ow, ts, wx + fpx + qx, wy + fpy + qy), gSample(ow, ts, wx - fpx - qx, wy - fpy - qy)),
+                                avg(gSample(ow, ts, wx + fpx - qx, wy + fpy - qy), gSample(ow, ts, wx - fpx + qx, wy - fpy + qy)))
+                }
+                val lit = mul(gc, lightAt(d, lp, wx, wy, t) * gl * fog * 0.95 * ow.dim(ix, iy), tn)
+                px[yy * W + xx] = if (ha > 0) blend(lit, if (rich) hazeC[xx] else ow.haze, ha) else lit
             }
         }
+    }
+
+    private fun gSample(ow: OpenWorld, ts: TexSet, wx: Double, wy: Double): Int {
+        val ix = floor(wx).toInt(); val iy = floor(wy).toInt()
+        return ow.groundFar(wx, wy, ix, iy, ts.floor[(((wy - iy) * 64).toInt() and 63) * 64 + (((wx - ix) * 64).toInt() and 63)])
+    }
+    private fun avg(a: Int, b: Int) = (0xFF shl 24) or ((((a and 0xFEFEFE) + (b and 0xFEFEFE)) ushr 1) and 0xFFFFFF)
+    /** Bilinear sample of the sky panorama (wraps around in azimuth). */
+    private fun skyBil(sky: IntArray, sw: Int, sh: Int, uf: Double, vf: Double): Int {
+        val u0 = floor(uf).toInt(); val fu = ((uf - u0) * 256).toInt(); val v0 = vf.toInt().coerceIn(0, sh - 2); val fv = ((vf - v0) * 256).toInt().coerceIn(0, 256)
+        val ua = u0 and (sw - 1); val ub = (u0 + 1) and (sw - 1)
+        return bil(sky[v0 * sw + ua], sky[v0 * sw + ub], sky[(v0 + 1) * sw + ua], sky[(v0 + 1) * sw + ub], fu, fv)
+    }
+    private fun bil(a: Int, b: Int, c: Int, d: Int, fu: Int, fv: Int): Int {
+        val r0 = ((a shr 16) and 255) * (256 - fu) + ((b shr 16) and 255) * fu; val r1 = ((c shr 16) and 255) * (256 - fu) + ((d shr 16) and 255) * fu
+        val g0 = ((a shr 8) and 255) * (256 - fu) + ((b shr 8) and 255) * fu; val g1 = ((c shr 8) and 255) * (256 - fu) + ((d shr 8) and 255) * fu
+        val b0 = (a and 255) * (256 - fu) + (b and 255) * fu; val b1 = (c and 255) * (256 - fu) + (d and 255) * fu
+        return pack((r0 * (256 - fv) + r1 * fv) shr 16, (g0 * (256 - fv) + g1 * fv) shr 16, (b0 * (256 - fv) + b1 * fv) shr 16)
+    }
+    /** Bilinear wall texel at continuous row `vv` (rows of all floors stacked), columns ua/ub with weight fu. Alpha 0xFE (glow) comes from the nearest texel. */
+    private fun wallBil(ow: OpenWorld, tex: Array<IntArray>, style: Int, ht: Int, maxRow: Int, vv: Double, ua: Int, ub: Int, fu: Int): Int {
+        val vc = vv.coerceIn(0.0, maxRow.toDouble()); val v0 = vc.toInt(); val v1 = min(maxRow, v0 + 1); val fv = ((vc - v0) * 256).toInt()
+        val t0 = tex[ow.texIndex(style, v0 shr 6, ht)]; val t1 = if ((v1 shr 6) == (v0 shr 6)) t0 else tex[ow.texIndex(style, v1 shr 6, ht)]
+        val r0 = (v0 and 63) * 64; val r1 = (v1 and 63) * 64
+        val c00 = t0[r0 + ua]; val c10 = t0[r0 + ub]; val c01 = t1[r1 + ua]; val c11 = t1[r1 + ub]
+        val nearest = if (fu < 128) (if (fv < 128) c00 else c01) else (if (fv < 128) c10 else c11)
+        val o = bil(c00, c10, c01, c11, fu, fv)
+        return if ((nearest ushr 24) == 0xFE) (o and 0xFFFFFF) or (0xFE shl 24) else o
     }
 
     /** One city column. The ray keeps going past low buildings so taller ones behind show above them; hits are drawn far to near. */
@@ -120,7 +166,9 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val hx = x + pp * rx; val hy = y + pp * ry
             var tx = (((if (sd == 0) hy else hx).let { it - floor(it) }) * 64).toInt() and 63
             if ((sd == 0 && rx > 0) || (sd == 1 && ry < 0)) tx = 63 - tx
-            val fogF = 1.0 / (1 + pp * pp * fk); val sideF = if (sd == 1) 0.82 else 1.0
+            // rich worlds light each face by the sun: faces turned towards it are bright, the others fall back to the sky light
+            val sideF = if (!rich) (if (sd == 1) 0.82 else 1.0) else { val nx = if (sd == 0) (if (rx > 0) -1.0 else 1.0) else 0.0; val ny = if (sd == 1) (if (ry > 0) -1.0 else 1.0) else 0.0; 0.6 + 0.55 * max(0.0, nx * sunDx + ny * sunDy) }
+            val fogF = 1.0 / (1 + pp * pp * fk)
             // the face is inside a dark building when the cell the ray came from is: no lamps, and the windows are dead too
             val dm = ow.dim(if (sd == 0) mx - (if (rx < 0) -1 else 1) else mx, if (sd == 0) my else my - (if (ry < 0) -1 else 1))
             val kk = (lightAt(d, lp, hx, hy, t) * gl * fogF * sideF * dm * 256).toInt().coerceIn(0, 640)
@@ -132,6 +180,21 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val y0 = max(0, top); val y1 = min(H - 1, bottom)
             val step = 64.0 / lh; var tpos = (y0 - top) * step
             val style = ow.style(mx, my); val unst = unstable(lv, mx, my)
+            if (rich) {
+                val mirror = (sd == 0 && rx > 0) || (sd == 1 && ry < 0)
+                val frac = (if (sd == 0) hy else hx).let { it - floor(it) }
+                val uu = (if (mirror) 64.0 - frac * 64.0 else frac * 64.0) - 0.5; val u0 = floor(uu).toInt(); val fu = ((uu - u0) * 256).toInt(); val ua = u0 and 63; val ub = (u0 + 1) and 63
+                val maxRow = ht * 64 - 1; val hzc = hazeC[xx]
+                for (yy in y0..y1) {
+                    val vv = tpos - 0.5; tpos += step
+                    var c = wallBil(ow, tex, style, ht, maxRow, vv, ua, ub, fu)
+                    if (step > 1.3) { val c2 = wallBil(ow, tex, style, ht, maxRow, vv + step * 0.5, ua, ub, fu); c = (c and (0xFF shl 24).inv().inv() and 0xFF000000.toInt()) or (avg(c, c2) and 0xFFFFFF) } // far walls: average two taps
+                    val ao = 0.66 + 0.34 * min(1.0, (bottom - yy).toDouble() / lh * 4.5) // darker where the wall meets the ground
+                    var o = if ((c ushr 24) == 0xFE) mul2(c, er, eg, eb) else mul2(c, (kr * ao).toInt(), (kg * ao).toInt(), (kb * ao).toInt())
+                    if (unst) o = pack((((o shr 16) and 255) * 3) / 4, ((o shr 8) and 255) + 25, (o and 255) + 60)
+                    px[yy * W + xx] = if (ha > 0) blend(o, hzc, ha) else o
+                }
+            } else
             for (yy in y0..y1) {
                 val tp = tpos.toInt(); tpos += step
                 val unit = tp shr 6 // floors counted from the roof line; the last one is the ground floor
@@ -365,8 +428,20 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
         // floor + ceiling (rows are split between threads)
         val ow = spec.world; val ch = g.camH
         if (ow != null) { // open sky: a sky instead of a ceiling needs the azimuth of every column and the elevation of every row above the horizon
-            for (xx in 0 until W) colU[xx] = (((atan2(dy + plY * camX[xx], dx + plX * camX[xx]) / (2 * PI)) * 2048).toInt()) and 2047
-            for (yy in 0 until min(H, hz + 1)) rowV[yy] = (atan((hz - yy) / (H * vs)) / (PI / 2) * 255).toInt().coerceIn(0, 255)
+            skyW = ow.skyW; skyH = ow.skyH
+            val sn = ow.sun; rich = sn != null && Settings.filterOn()
+            for (xx in 0 until W) { val u = (atan2(dy + plY * camX[xx], dx + plX * camX[xx]) / (2 * PI)) * skyW; colU[xx] = u.toInt() and (skyW - 1); colUf[xx] = ((u % skyW) + skyW) % skyW }
+            for (yy in 0 until min(H, hz + 1)) { val e = (atan((hz - yy) / (H * vs)) / (PI / 2) * (skyH - 1)); rowV[yy] = e.toInt().coerceIn(0, skyH - 1); rowVf[yy] = e.coerceIn(0.0, skyH - 1.0) }
+            if (rich && sn != null) {
+                sunDx = cos(sn.azimuth); sunDy = sin(sn.azimuth); sunEl = sn.elevation
+                // haze takes the colour of the sky at the horizon (so the far ground melts into it), warmed towards the sun
+                val hy0 = (hz - 1).coerceIn(0, H - 1); val vf0 = if (hz - 1 in 0 until H) rowVf[hy0] else 0.0
+                for (xx in 0 until W) {
+                    val hs = blend(skyBil(ow.sky, skyW, skyH, colUf[xx], vf0), ow.haze, 40)
+                    val ang = atan2(dy + plY * camX[xx], dx + plX * camX[xx]); val sd = max(0.0, cos(ang - sn.azimuth))
+                    hazeC[xx] = blend(hs, sn.color, (sd * sd * sd * sd * 0.3 * 256).toInt().coerceIn(0, 256))
+                }
+            } else rich = false
         }
         par(H) { b, r0, r1 ->
             val lp = bands[b]
@@ -464,6 +539,19 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
                     if (c != 0) px[row * W + col] = c
                 }
             }
+        }
+
+        if (rich && ow != null && Settings.atmosphereOn()) { // light shafts (screen-space, towards the sun) and drifting pollen
+            val sn = ow.sun!!; val facing = dx * sunDx + dy * sunDy
+            val fk2 = ((facing + 0.15) / 1.15).coerceIn(0.0, 1.0)
+            if (fk2 > 0.02) {
+                val th = atan2(dx * sunDy - dy * sunDx, dx * sunDx + dy * sunDy).coerceIn(-1.45, 1.45)
+                val sxp = (tan(th) / pl + 1) * W / 2; val syp = hz - tan(sunEl) * H * vs
+                val sky = ow.sky; val sw = skyW; val sh = skyH
+                atmo.prepare(px, hz, sxp, syp, sn.shafts * fk2 * fk2, sn.color) { xx, yy -> skyBil(sky, sw, sh, colUf[xx], rowVf[yy]) }
+                par(H) { _, r0, r1 -> atmo.blendRows(px, r0, r1) }
+            }
+            if (sn.dust > 0.0) atmo.dust(px, zb, x, y, dx, dy, pl, hz, vs, ch, t, facing, sn.color, sn.dust)
         }
 
         // post: vignette, film grain, danger pulse, death fade (rows are split between threads, each with its own grain stream)

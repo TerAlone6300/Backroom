@@ -50,6 +50,10 @@ object Settings {
     @Volatile var quality = Q_HIGH
     fun putQuality(q: Int) { quality = q.coerceIn(Q_LOW, Q_HIGH) }
     /** Max DDA steps for wall rays. */
+    /** Smooth textures, anti-aliased far ground and sun-tinted haze (open worlds with a sun). */
+    fun filterOn() = quality >= Q_MED
+    /** Light shafts and floating pollen. */
+    fun atmosphereOn() = quality >= Q_HIGH
     fun ddaSteps() = when (quality) { Q_LOW -> 32; Q_MED -> 48; else -> 64 }
     /** Max sprites written into the scene (far ones drop first). */
     fun maxSprites() = when (quality) { Q_LOW -> 24; Q_MED -> 40; else -> Scene.MAX_SPR }

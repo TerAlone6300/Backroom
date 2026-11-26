@@ -4,8 +4,12 @@ import kotlin.math.*
 
 /** A level with no ceiling: walls of different heights, its own ground colours and a sky panorama. The city, the island and the graveyard are open worlds. */
 interface OpenWorld {
-    /** 2048 x 256 panorama: azimuth around, elevation 0..90 degrees upward. */
+    /** Sky panorama of [skyW] x [skyH] (powers of two; 2048 x 256 unless the level says otherwise): azimuth around, elevation 0..90 degrees upward. */
     val sky: IntArray
+    val skyW: Int get() = 2048
+    val skyH: Int get() = 256
+    /** A sun turns on the rich look: smooth textures, haze that takes the colour of the horizon and the sun, light shafts and floating pollen (Options > quality). null = the plain look. */
+    val sun: Sun? get() = null
     /** Wall textures (64x64); alpha 0xFE marks glowing texels (lit windows). */
     val tex: Array<IntArray>
     /** Colour far things fade into, and how fast (the city uses 0.0007). */
@@ -21,6 +25,8 @@ interface OpenWorld {
     fun texIndex(style: Int, unit: Int, ht: Int): Int
     /** Ground colour at (wx, wy) in cell (ix, iy); `base` is the grain taken from the level's floor texture. */
     fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int
+    /** Cheaper ground for the extra samples taken on far ground (no sub-pixel detail needed there). */
+    fun groundFar(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int = ground(wx, wy, ix, iy, base)
     /** Light factor of a floor cell (dark buildings, caves): 1 = normal. */
     fun dim(x: Int, y: Int): Double = 1.0
     /** True where there is rock overhead (tunnels): the sky is hidden. */
