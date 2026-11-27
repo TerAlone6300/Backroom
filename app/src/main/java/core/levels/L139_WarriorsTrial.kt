@@ -61,7 +61,7 @@ object Island : OpenWorld {
         if (r < CRATER || r >= 24.0) return 0
         var c = 0; val ang = Math.toDegrees(atan2(py, px))
         if (r in 17.0..26.0 && near(CAVE, px, py) <= 1.1) c = c or C_CAVE
-        if (r in 5.5..17.8 && near(VOLC, px, py) <= 1.7) { c = c or C_VOLC; if (h(x, y, 650) < 0.5 && near(VOLC, px, py) > 0.75) c = c or C_LAVA } // 3-4 wide; lava pools at the edges, a clear line down the middle
+        if (r in 5.5..17.8 && near(VOLC, px, py) <= 1.7) { c = c or C_VOLC; if (hf(x, y, 650) < 0.5 && near(VOLC, px, py) > 0.75) c = c or C_LAVA } // 3-4 wide; lava pools at the edges, a clear line down the middle
         if (abs(r - LEDGE_R) < 0.75 && ang <= A0 && ang >= A1) c = c or C_LEDGE
         if (c == 0 && r >= 15.7 && r < 16.55 && ang <= A0 + 3 && ang >= A1 - 3 && hypot(px - TUNNEL_START[0], py - TUNNEL_START[1]) > 2.2) c = C_DROP // the gap below the ledge
         if (c == 0) c = C_SOLID or (if (r >= 18.05 && r < 20.5 && ang <= A0 && ang >= A1) C_FALLS else 0) // rock; the cliff beside the ledge is the waterfall
@@ -84,16 +84,16 @@ object Island : OpenWorld {
         val r = rad(x, y)
         if (r < CRATER) return false                                    // the summit: ash and the lake
         if (r < 24.0) return (cell(x, y) and C_SOLID) != 0              // the volcano is solid rock except the three routes
-        if (r < 34.0) return if (y > 0 && abs(x) <= 2) false else h(x, y, 600) < 0.10 // jungle, with a clear trail south
-        if (r < 41.0) return h(x, y, 601) < 0.025                       // a few palms on the beach
+        if (r < 34.0) return if (y > 0 && abs(x) <= 2) false else hf(x, y, 600) < 0.10 // jungle, with a clear trail south
+        if (r < 41.0) return hf(x, y, 601) < 0.025                       // a few palms on the beach
         return false                                                    // shallows and open sea
     }
 
     override val haze = pack(200, 226, 244)
     override val hazeK = 0.0009
     override val roofColor = pack(34, 28, 24)
-    override fun height(x: Int, y: Int) = if (rad(x, y) < 24.0) (if ((cell(x, y) and C_FALLS) != 0) 14 else 6 + (h(x / 3, y / 3, 610) * 3).toInt()) else 2 + (h(x, y, 611) * 2).toInt()
-    override fun style(x: Int, y: Int) = if (rad(x, y) < 24.0) (if ((cell(x, y) and C_FALLS) != 0) 3 else if (h(x / 2, y / 2, 612) < 0.5) 0 else 1) else 2
+    override fun height(x: Int, y: Int) = if (rad(x, y) < 24.0) (if ((cell(x, y) and C_FALLS) != 0) 14 else 6 + (hf(x / 3, y / 3, 610) * 3).toInt()) else 2 + (hf(x, y, 611) * 2).toInt()
+    override fun style(x: Int, y: Int) = if (rad(x, y) < 24.0) (if ((cell(x, y) and C_FALLS) != 0) 3 else if (hf(x / 2, y / 2, 612) < 0.5) 0 else 1) else 2
     override fun texIndex(style: Int, unit: Int, ht: Int) = if (style == 3) 4 else if (style < 2) style else if (unit >= ht - 1) 3 else 2
     override fun roofed(x: Int, y: Int) = (cell(x, y) and (C_CAVE or C_VOLC)) != 0
     override fun dim(x: Int, y: Int): Double { val c = cell(x, y); return if ((c and C_CAVE) != 0) 0.2 else if ((c and C_VOLC) != 0) 0.55 else 1.0 }
@@ -112,7 +112,7 @@ object Island : OpenWorld {
         return when {
             r < LAKE + 0.3 -> col(40, 120, 170, n, 0.85 + 0.15 * sin(r * 3.0 + wx))   // the crater lake
             r < CRATER -> col(76, 66, 60, n)                                           // ash around the lake
-            r < 34.0 -> if (wy > 0 && abs(wx) <= 2.0) col(150, 120, 76, n) else col(54, 108, 46, n, 0.85 + 0.3 * h(ix, iy, 602)) // trail / jungle floor
+            r < 34.0 -> if (wy > 0 && abs(wx) <= 2.0) col(150, 120, 76, n) else col(54, 108, 46, n, 0.85 + 0.3 * hf(ix, iy, 602)) // trail / jungle floor
             r < 41.0 -> col(218, 194, 142, n)                                          // sand
             r < 47.0 -> { val t = (r - 41.0) / 6.0; col((218 * (1 - t) + 80 * t).toInt(), (194 * (1 - t) + 170 * t).toInt(), (142 * (1 - t) + 190 * t).toInt(), n) } // shallows
             else -> col(24, 88, 140, n, 0.9 + 0.2 * sin(wx * 0.9 + wy * 0.6))          // deep sea
@@ -120,13 +120,13 @@ object Island : OpenWorld {
     }
 
     override val tex: Array<IntArray> by lazy {
-        fun rock(v: Int) = IntArray(4096) { j -> val x = j % 64; val y = j / 64; var f = 0.7 + 0.5 * h(x, y, 620 + v)
-            if (y % 16 == 0) f *= 0.7; if (h(x / 4, y / 6, 625) < 0.10) f *= 0.6
+        fun rock(v: Int) = IntArray(4096) { j -> val x = j % 64; val y = j / 64; var f = 0.7 + 0.5 * hf(x, y, 620 + v)
+            if (y % 16 == 0) f *= 0.7; if (hf(x / 4, y / 6, 625) < 0.10) f *= 0.6
             pack(((70 + 10 * v) * f).toInt(), ((60 + 8 * v) * f).toInt(), ((54 + 8 * v) * f).toInt()) }
         arrayOf(rock(0), rock(1),
-            IntArray(4096) { j -> val x = j % 64; val y = j / 64; var f = 0.6 + 0.8 * h(x, y, 630); if (h(x / 5, y / 5, 631) < 0.3) f *= 1.3; pack((40 * f).toInt(), (120 * f).toInt(), (50 * f).toInt()) },
-            IntArray(4096) { j -> val x = j % 64; val y = j / 64; val f = 0.7 + 0.6 * h(x / 2, y / 8, 632); pack((110 * f).toInt(), (78 * f).toInt(), (46 * f).toInt()) },
-            IntArray(4096) { j -> val x = j % 64; val y = j / 64; val f = 0.75 + 0.5 * h(x, y / 20, 640); if (x % 7 == 3 || h(x, y / 3, 641) < 0.06) pack(238, 246, 255) else pack((150 * f).toInt(), (200 * f).toInt(), (236 * f).toInt()) }) // waterfall: streaming white water
+            IntArray(4096) { j -> val x = j % 64; val y = j / 64; var f = 0.6 + 0.8 * hf(x, y, 630); if (hf(x / 5, y / 5, 631) < 0.3) f *= 1.3; pack((40 * f).toInt(), (120 * f).toInt(), (50 * f).toInt()) },
+            IntArray(4096) { j -> val x = j % 64; val y = j / 64; val f = 0.7 + 0.6 * hf(x / 2, y / 8, 632); pack((110 * f).toInt(), (78 * f).toInt(), (46 * f).toInt()) },
+            IntArray(4096) { j -> val x = j % 64; val y = j / 64; val f = 0.75 + 0.5 * hf(x, y / 20, 640); if (x % 7 == 3 || hf(x, y / 3, 641) < 0.06) pack(238, 246, 255) else pack((150 * f).toInt(), (200 * f).toInt(), (236 * f).toInt()) }) // waterfall: streaming white water
     }
 
     /** 2048 x 256 day sky: pale at the horizon, deep blue overhead, clouds and a sun. */
@@ -135,7 +135,7 @@ object Island : OpenWorld {
         for (v in 0 until hh) {
             val e = v / 255.0; val r0 = 196 - 120 * e; val g0 = 224 - 90 * e; val b0 = 244 - 36 * e
             for (u in 0 until w) {
-                val cl = ((valueNoise(u / 150.0, v / 16.0, 801, 14) - 0.55) / 0.45).coerceIn(0.0, 1.0) * (0.9 - 0.5 * e).coerceAtLeast(0.0)
+                val cl = ((valueNoiseF(u / 150.0, v / 16.0, 801, 14) - 0.55) / 0.45).coerceIn(0.0, 1.0) * (0.9 - 0.5 * e).coerceAtLeast(0.0)
                 s[v * w + u] = pack((r0 + (255 - r0) * cl * 0.85).toInt(), (g0 + (255 - g0) * cl * 0.85).toInt(), (b0 + (255 - b0) * cl * 0.85).toInt())
             }
         }

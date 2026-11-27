@@ -44,11 +44,13 @@ private const val LEGACY_SECT = 96
 
 private fun legacyLevel0Hallway(lv: Int, x: Int, y: Int): Int {
     val sx = Math.floorDiv(x, LEGACY_SECT); val sy = Math.floorDiv(y, LEGACY_SECT); val q = lv * 7
-    if (h(sx, sy, 500 + q) > 0.38) return 0
-    val horiz = h(sx, sy, 501 + q) < 0.5
-    val len = 36 + (h(sx, sy, 502 + q) * 25).toInt()
-    val a0 = 6 + (h(sx, sy, 503 + q) * (LEGACY_SECT - len - 12)).toInt() // start along the hallway
-    val p0 = 6 + (h(sx, sy, 504 + q) * (LEGACY_SECT - 18)).toInt()       // first side wall across it
+    val fixed = levelSpec(lv).world != null // open worlds are the same in every game: their long hallways follow the fixed seed too
+    fun r(x0: Int, y0: Int, s0: Int) = if (fixed) hf(x0, y0, s0) else h(x0, y0, s0)
+    if (r(sx, sy, 500 + q) > 0.38) return 0
+    val horiz = r(sx, sy, 501 + q) < 0.5
+    val len = 36 + (r(sx, sy, 502 + q) * 25).toInt()
+    val a0 = 6 + (r(sx, sy, 503 + q) * (LEGACY_SECT - len - 12)).toInt() // start along the hallway
+    val p0 = 6 + (r(sx, sy, 504 + q) * (LEGACY_SECT - 18)).toInt()       // first side wall across it
     val lx = Math.floorMod(x, LEGACY_SECT); val ly = Math.floorMod(y, LEGACY_SECT)
     val u = if (horiz) lx else ly; val v = if (horiz) ly else lx
     if (v < p0 || v > p0 + 4 || u < a0 - 3 || u >= a0 + len + 3) return 0

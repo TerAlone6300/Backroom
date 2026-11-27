@@ -50,6 +50,9 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
     private var rich = false; private var sunDx = 0.0; private var sunDy = 0.0; private var sunEl = 0.0
     private var skyW = 2048; private var skyH = 256
     private val atmo = Atmosphere(W, H)
+    private val bakes = HashMap<Int, TerrainBake>()
+    private var bake: TerrainBake? = null; private var bakeFrom = 0.0
+    private fun bakeFor(lv: Int, ow: OpenWorld, ts: TexSet, x: Double, y: Double): TerrainBake = bakes.getOrPut(lv) { TerrainBake(ow, ts.floor).also { it.prewarm(x, y) } }
 
     /** body(band, from, to) over [0, n) in `nt` slices; the last slice runs on the calling thread. */
     /** Stops the worker threads. Call it when this Renderer is replaced (the frame size changed). */
@@ -96,12 +99,16 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
             val ha = ((1.0 - 1.0 / (1 + rd * rd * ow.hazeK * Settings.fogScale)) * 256).toInt() // distance haze
             // far ground is sampled several times per pixel (the footprint of a pixel grows with distance), or flowers shimmer and crawl
             val taps = if (!rich || rd < 2.5) 1 else if (rd < 6.0) 2 else 4
+            val bk = bake
+            val lod = if (bk == null) 0.0 else ln(max(1.0, max(hypot(plX, plY) * (2.0 / W) * rd, hypot(dx, dy) * rd / dr) * TerrainBake.RES)) / ln(2.0)
             val fpx = plX * (2.0 / W) * rd * 0.3; val fpy = plY * (2.0 / W) * rd * 0.3; val qx = dx * rd / dr * 0.3; val qy = dy * rd / dr * 0.3
             for (xx in 0 until W) {
                 val cx = camX[xx]
                 val wx = x + (dx + plX * cx) * rd; val wy = y + (dy + plY * cx) * rd
                 val ix = floor(wx).toInt(); val iy = floor(wy).toInt()
-                val gc = when (taps) {
+                var gc = 0
+                if (bk != null && rd >= bakeFrom) { gc = if (rd < TerrainBake.RADIUS - 1) bk.sample(wx, wy, lod) else 0; if (gc == 0) gc = bk.coarse(wx, wy) } // ground baked on the CPU
+                if (gc == 0) gc = when (taps) {
                     1 -> { val tx = ((wx - ix) * 64).toInt() and 63; val ty = ((wy - iy) * 64).toInt() and 63; val tb = ts.floor[ty * 64 + tx]; if (rich) ow.ground(wx, wy, ix, iy, tb) else ow.groundFar(wx, wy, ix, iy, tb) } // Low quality: the cheaper ground
                     2 -> avg(gSample(ow, ts, wx + fpx + qx, wy + fpy + qy), gSample(ow, ts, wx - fpx - qx, wy - fpy - qy))
                     else -> avg(avg(gSample(ow, ts, wx + fpx + qx, wy + fpy + qy), gSample(ow, ts, wx - fpx - qx, wy - fpy - qy)),
@@ -442,6 +449,8 @@ class Renderer(val W: Int = FRAME_W, val H: Int = FRAME_H, threads: Int = min(4,
                     hazeC[xx] = blend(hs, sn.color, (sd * sd * sd * sd * 0.3 * 256).toInt().coerceIn(0, 256))
                 }
             } else rich = false
+            val bf = ow.bakeFrom
+            if (bf != null && Settings.filterOn()) { bake = bakeFor(g.level, ow, ts, x, y).also { it.update(x, y) }; bakeFrom = bf } else bake = null
         }
         par(H) { b, r0, r1 ->
             val lp = bands[b]

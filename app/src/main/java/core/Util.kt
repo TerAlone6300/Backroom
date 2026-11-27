@@ -11,6 +11,16 @@ const val PORT = 7777
 const val FRAME_W = 1920
 const val FRAME_H = 1080
 
+/** Seed of the worlds that are the same in every game (the open worlds: the City, the Warrior's Trial, Hortus Aeturnus, the Grave). It is the seed every world had before worlds became random, so they look exactly as they always did. */
+const val FIXED_WORLD_SEED = LEGACY_SEED
+/** [h] with the fixed seed: the open worlds build their terrain, buildings and decoration with this, so it never changes from one game to the next. */
+fun hf(x: Int, y: Int, s: Int): Double {
+    var n = x * 374761393 + y * 668265263 + s * 1274126177 + FIXED_WORLD_SEED
+    n = (n xor (n ushr 13)) * 1274126177
+    n = n xor (n ushr 16)
+    return (n and 0xFFFF) / 65536.0
+}
+
 fun h(x: Int, y: Int, s: Int): Double {
     var n = x * 374761393 + y * 668265263 + s * 1274126177 + worldSeed
     n = (n xor (n ushr 13)) * 1274126177

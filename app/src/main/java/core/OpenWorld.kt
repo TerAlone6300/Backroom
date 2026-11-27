@@ -25,6 +25,10 @@ interface OpenWorld {
     fun texIndex(style: Int, unit: Int, ht: Int): Int
     /** Ground colour at (wx, wy) in cell (ix, iy); `base` is the grain taken from the level's floor texture. */
     fun ground(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int
+    /** From this distance (world units) the renderer reads the ground from [TerrainBake] (baked on the CPU) instead of calling [ground] per pixel; null = never. */
+    val bakeFrom: Double? get() = null
+    /** Changes whenever [ground] changes while the game runs (e.g. a path opens): baked tiles of an older version are rebuilt. */
+    val groundVersion: Int get() = 0
     /** Cheaper ground for the extra samples taken on far ground (no sub-pixel detail needed there). */
     fun groundFar(wx: Double, wy: Double, ix: Int, iy: Int, base: Int): Int = ground(wx, wy, ix, iy, base)
     /** Light factor of a floor cell (dark buildings, caves): 1 = normal. */
@@ -33,6 +37,15 @@ interface OpenWorld {
     fun roofed(x: Int, y: Int): Boolean = false
     /** Extra sprites around (x, y): [x, y, sprite code]. */
     fun extraSprites(x: Double, y: Double, out: MutableList<DoubleArray>) {}
+}
+
+/** [valueNoise] on the fixed world seed (see [hf]). */
+fun valueNoiseF(x: Double, y: Double, s: Int, wrap: Int = 1 shl 20): Double {
+    val xi = floor(x).toInt(); val yi = floor(y).toInt(); val fx = x - xi; val fy = y - yi
+    val x0 = Math.floorMod(xi, wrap); val x1 = Math.floorMod(xi + 1, wrap)
+    val a = hf(x0, yi, s); val b = hf(x1, yi, s); val c = hf(x0, yi + 1, s); val d = hf(x1, yi + 1, s)
+    val sx = fx * fx * (3 - 2 * fx); val sy = fy * fy * (3 - 2 * fy)
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy
 }
 
 /** Smooth value noise, tiling every `wrap` cells along x. */

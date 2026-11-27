@@ -63,7 +63,7 @@ fun supplyAt(lv: Int, x: Int, y: Int): Int {
     if (Settings.explore || lv == LV_GRAVE) return 0 // no hunger in Explore, so no supplies
     if (lv == 0 && !Manila.inside(x + 0.5, y + 0.5)) return 0
     if (isWall(lv, x, y)) return 0
-    if (lv == LV_CITY && City.cacheCell(x, y)) return if (h(x, y, 191) >= 0.22) 0 else if (h(x, y, 881) < 0.4) 2 else 1 // stocked building
+    if (lv == LV_CITY && City.cacheCell(x, y)) return if (hf(x, y, 191) >= 0.22) 0 else if (hf(x, y, 881) < 0.4) 2 else 1 // stocked building
     val p = if (lv == 0) 0.12 else if (lv == LV_CITY) 0.0006 else if (lv == LV_HORTUS) 0.0035 else 0.0010 // the garden grows plenty
     if (h(x, y, 880 + lv) >= p) return 0
     return if (h(x, y, 881) < 0.4) 2 else 1
